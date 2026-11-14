@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ── Deep Space Theme (per Docs/frontend-conventions/DESIGN.md) ── */
+
+:root {
+  /* Backgrounds */
+  --color-bg-primary: #0f0e13;    /* Deep space — app background */
+  --color-bg-surface: #1d1b22;    /* Card / elevated panels */
+  --color-bg-elevated: #27272a;   /* Subtle elevation above surface */
+  --color-bg-input: #1d1b22;      /* Inputs share surface background */
+
+  /* Text */
+  --color-text-primary: #f7f7f8;  /* Body text, headings — near-white */
+  --color-text-secondary: #a1a1aa; /* Secondary labels */
+  --color-text-muted: #71717a;    /* Disabled states, captions */
+
+  /* Borders */
+  --color-border: #27272a;        /* Subtle dividers on dark surfaces */
+  --color-border-focus: #f59e0b;  /* Accent focus ring */
+
+  /* Semantic colors */
+  --color-accent: #f59e0b;        /* Solar amber — primary actions, links, solar highlights */
+  --color-warning: #d97706;       /* Caution states */
+  --color-error: #dc2626;         /* Invalid input, failed validation */
+  --color-success: #16a34a;       /* Valid state, confirmed computation */
+  --color-info: #3b82f6;          /* Neutral information, Earth */
+
+  /* Domain colors (Sun = solar accent, Earth = info blue) */
+  --color-sun: #f59e0b;           /* Solar accent for Sun */
+  --color-earth: #3b82f6;         /* Info blue for Earth */
+  --color-terrain: #a1a1aa;       /* Muted terrain */
+
+  /* Constraint verdicts */
+  --color-meets: #16a34a;         /* Success green for passes */
+  --color-misses: #dc2626;        /* Error red for failures */
+  --color-unknown: #71717a;       /* Muted for unknown */
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+
+html, body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Dashboard shell: no-scroll, full viewport ── */
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Focus visible for keyboard nav ── */
+
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ── Skip link for keyboard users ── */
+
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  padding: 0.5rem 1rem;
+  z-index: 50;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 0 0 0.5rem 0;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* ── Scrollbar styling for internal panels ── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ── SVG chart defaults ── */
+
+svg text {
+  font-family: var(--font-sans);
+}

@@ -10,10 +10,17 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "dependencies": {
+    "core": "workspace:*",
+    "three": "^0.170.0"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@tailwindcss/vite": "^4.1.7",
+    "@types/three": "^0.187.0",
     "eslint": "^9.39.2",
     "globals": "^15.9.0",
+    "tailwindcss": "^4.1.7",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.39.2",
     "vite": "^6.3.5",
