@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "header": {
+    "schemaVersion": 1,
+    "kernels": [],
+    "frame": "MOON_ME",
+    "aberrationCorrection": "apparent",
+    "timeScale": "TDB",
+    "units": {
+      "time": "TDB seconds",
+      "direction": "degrees",
+      "distance": "kilometers"
+    },
+    "supportedStartEpochTdbSec": 0.0,
+    "supportedEndEpochTdbSec": 0.0,
+    "fitErrorDirectionDeg": 0.001,
+    "fitErrorMeasuredDirectionDeg": 0.0
+  },
+  "segments": []
+}

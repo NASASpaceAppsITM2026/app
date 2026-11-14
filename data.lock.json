@@ -1,0 +1,23 @@
+{
+  "lockSchemaVersion": 1,
+  "releaseVersion": "0.1.0",
+  "source": {
+    "repository": "lunar-navigator-pipeline",
+    "releaseTag": "v0.1.0"
+  },
+  "artifacts": [
+    {
+      "artifact": "ephemeris_v1",
+      "fileName": "ephemeris_v1.json",
+      "sha256": "230354ce10a95121f074370774b4e908664e77295397fb191b54408fc4ffb7bc",
+      "bytes": 454
+    },
+    {
+      "artifact": "horizon_masks_v1",
+      "fileName": "horizon_masks_v1.json",
+      "sha256": "63919ec6c701414f7169fedde4316b0b7b805364bd80f039529a191f7d89bcf6",
+      "bytes": 385
+    }
+  ],
+  "syncedAtUtc": "2026-11-14T00:00:00Z"
+}

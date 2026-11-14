@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "header": {
+    "schemaVersion": 1,
+    "demProductName": "LDEM_80S_20M",
+    "demVersion": "1.0",
+    "demSha256": "DB44C3B2444ACFF1AF528301C8A6988934B490249ACEFF0AC55668BDF3EAB365",
+    "resolutionM": 20,
+    "sphereRadiusKm": 1737.4,
+    "observerHeightKm": 0.0,
+    "azimuthStepDeg": 0.0,
+    "maxRayRangeKm": 0.0,
+    "status": "ok"
+  },
+  "sites": []
+}
