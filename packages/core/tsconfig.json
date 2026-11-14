@@ -8,6 +8,7 @@
     "noEmit": true,
     "declaration": true,
     "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "types": ["vitest/globals"]
   },
