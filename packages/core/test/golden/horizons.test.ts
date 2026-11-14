@@ -6,7 +6,7 @@ import southPoleEarth from "../../../../tests/fixtures/horizons/south_pole_Earth
 import southPoleSummerSun from "../../../../tests/fixtures/horizons/south_pole_summer_Sun_2026.json";
 import southPoleSummerEarth from "../../../../tests/fixtures/horizons/south_pole_summer_Earth_2026.json";
 import ephemeris2026 from "../../../../tests/fixtures/ephemeris_2026.json";
-import { configureEphemerisArtifact, skyAt } from "../../src/ephemeris";
+import { configureEphemerisArtifact, skyAt, type EphemerisArtifact } from "../../src/ephemeris";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -90,7 +90,7 @@ describe("JPL Horizons golden validation fixtures and metrics", () => {
   });
 
   describe("Golden test vs JPL Horizons (< 0.01 deg tolerance gate)", () => {
-    configureEphemerisArtifact(ephemeris2026 as any);
+    configureEphemerisArtifact(ephemeris2026 as unknown as EphemerisArtifact);
 
     for (const { name, fixture } of fixtures) {
       it(`validates ${name} within 0.01 deg tolerance against JPL Horizons`, () => {
