@@ -11,10 +11,31 @@
       "direction": "degrees",
       "distance": "kilometers"
     },
-    "supportedStartEpochTdbSec": 0.0,
-    "supportedEndEpochTdbSec": 0.0,
+    "supportedStartEpochTdbSec": 847800032.184,
+    "supportedEndEpochTdbSec": 847886432.184,
     "fitErrorDirectionDeg": 0.001,
     "fitErrorMeasuredDirectionDeg": 0.0
   },
-  "segments": []
+  "segments": [
+    {
+      "bodyPair": "MOON_TO_SUN",
+      "startEpochTdbSec": 847800032.184,
+      "endEpochTdbSec": 847886432.184,
+      "chebyshev": {
+        "order": 0,
+        "direction": [[0.0, 0.0, 1.0]],
+        "distanceKm": [384400.0]
+      }
+    },
+    {
+      "bodyPair": "MOON_TO_EARTH",
+      "startEpochTdbSec": 847800032.184,
+      "endEpochTdbSec": 847886432.184,
+      "chebyshev": {
+        "order": 0,
+        "direction": [[1.0, 0.0, 0.0]],
+        "distanceKm": [363000.0]
+      }
+    }
+  ]
 }
