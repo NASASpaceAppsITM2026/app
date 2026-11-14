@@ -78,6 +78,7 @@ export interface SlipWindowCandidate {
   readonly site: LunarSite;
   readonly dateUtc: string;
   readonly verdict: Verdict;
+  readonly reason: string;
 }
 
 /** Result of the slip-window finder. */

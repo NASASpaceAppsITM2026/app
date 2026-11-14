@@ -27,3 +27,9 @@ export {
   resetConfiguredHorizonMasksArtifact,
   validateHorizonMasksArtifact,
 } from "./terrain";
+export {
+  type SlipWindowCandidate,
+  type SlipWindowInput,
+  type SlipWindowResult,
+  slipWindowFinder,
+} from "./planning";
