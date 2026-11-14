@@ -190,6 +190,105 @@ export async function sampleDailyWindows(
   return samples;
 }
 
+/**
+ * Landing-area robustness check.
+ * Answers: "Would the plan still work if the lander touched down a little away from the target?"
+ * Checks a grid of points within `radiusKm` of the target site and evaluates constraints at each.
+ */
+export interface LandingAreaResult {
+  readonly total: number;
+  readonly meets: number;
+  readonly misses: number;
+  readonly unknown: number;
+  readonly sunElevMin: number;
+  readonly sunElevMax: number;
+  readonly earthElevMin: number;
+  readonly earthElevMax: number;
+  readonly gridPoints: number;
+}
+
+export async function checkLandingArea(
+  site: LunarSite,
+  dateUtc: string,
+  hourUtc: number,
+  radiusKm: number,
+  constraints: readonly Constraint[],
+): Promise<LandingAreaResult> {
+  // Convert km to degrees (approximate: 1° ≈ 29.7 km at equator, less at poles)
+  const kmPerDegLat = 29.7;
+  const kmPerDegLon = 29.7 * Math.cos((site.latDeg * Math.PI) / 180);
+  const dLat = radiusKm / kmPerDegLat;
+  const dLon = kmPerDegLon > 0.1 ? radiusKm / kmPerDegLon : dLat * 2;
+
+  // Grid spacing: ~1 km steps, capped at 100 points total
+  const stepDeg = Math.max(0.05, Math.min(dLat, dLon) / 5);
+  const points: Array<{ latDeg: number; lonDeg: number }> = [];
+
+  for (let lat = site.latDeg - dLat; lat <= site.latDeg + dLat; lat += stepDeg) {
+    for (let lon = site.eastLonDeg - dLon; lon <= site.eastLonDeg + dLon; lon += stepDeg) {
+      // Check distance in km
+      const dLatKm = (lat - site.latDeg) * kmPerDegLat;
+      const dLonKm = (lon - site.eastLonDeg) * kmPerDegLon;
+      if (Math.hypot(dLatKm, dLonKm) <= radiusKm) {
+        points.push({ latDeg: lat, lonDeg: lon });
+      }
+    }
+  }
+
+  // Cap points to avoid long waits
+  const maxPoints = 100;
+  if (points.length > maxPoints) {
+    const step = Math.ceil(points.length / maxPoints);
+    const sampled = points.filter((_, i) => i % step === 0);
+    points.length = 0;
+    points.push(...sampled);
+  }
+
+  let meets = 0, misses = 0, unknown = 0;
+  let sunElevMin = Infinity, sunElevMax = -Infinity;
+  let earthElevMin = Infinity, earthElevMax = -Infinity;
+
+  for (const pt of points) {
+    const ptSite: LunarSite = { id: "area-check", eastLonDeg: pt.lonDeg, latDeg: pt.latDeg };
+    let sky: SkyState;
+    try {
+      sky = await skyAtForDate(ptSite, dateUtc, hourUtc);
+    } catch {
+      unknown++;
+      continue;
+    }
+
+    sunElevMin = Math.min(sunElevMin, sky.sunElevationDeg);
+    sunElevMax = Math.max(sunElevMax, sky.sunElevationDeg);
+    earthElevMin = Math.min(earthElevMin, sky.earthElevationDeg);
+    earthElevMax = Math.max(earthElevMax, sky.earthElevationDeg);
+
+    const { mask } = await horizonMaskForSite(ptSite);
+    const rows = evaluateUiConstraints(constraints, sky, mask);
+    let verdict: Verdict = "meets";
+    if (rows.some((r) => r.verdict === "misses")) verdict = "misses";
+    else if (rows.some((r) => r.verdict === "unknown")) verdict = "unknown";
+    if (constraints.length === 0) verdict = "meets";
+
+    if (verdict === "meets") meets++;
+    else if (verdict === "misses") misses++;
+    else unknown++;
+  }
+
+  const total = meets + misses + unknown;
+  return {
+    total,
+    meets,
+    misses,
+    unknown,
+    sunElevMin: isFinite(sunElevMin) ? sunElevMin : 0,
+    sunElevMax: isFinite(sunElevMax) ? sunElevMax : 0,
+    earthElevMin: isFinite(earthElevMin) ? earthElevMin : 0,
+    earthElevMax: isFinite(earthElevMax) ? earthElevMax : 0,
+    gridPoints: points.length,
+  };
+}
+
 /** Horizons observer query for quantity 4 (azimuth/elevation), airless surface site. */
 export function horizonsVerifyUrl(site: LunarSite, dateUtc: string, target: "sun" | "earth"): string {
   const command = target === "sun" ? "10" : "399";

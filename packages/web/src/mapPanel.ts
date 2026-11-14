@@ -33,10 +33,15 @@ export interface MapPanelHandles {
   readonly polar: HTMLCanvasElement;
 }
 
-export function drawMaps(handles: MapPanelHandles, site: LunarSite): void {
+export interface MapDrawOptions {
+  readonly site: LunarSite;
+  readonly ellipseRadiusKm?: number;
+}
+
+export function drawMaps(handles: MapPanelHandles, site: LunarSite, ellipseRadiusKm?: number): void {
   if (!moonImage) return;
-  drawGlobalMap(handles.global, moonImage, site);
-  drawPolarMap(handles.polar, moonImage, site);
+  drawGlobalMap(handles.global, moonImage, site, ellipseRadiusKm);
+  drawPolarMap(handles.polar, moonImage, site, ellipseRadiusKm);
 }
 
 export function bindMapClicks(
@@ -67,7 +72,7 @@ function canvasUv(canvas: HTMLCanvasElement, event: MouseEvent): { u: number; v:
   };
 }
 
-function drawGlobalMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: LunarSite): void {
+function drawGlobalMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: LunarSite, ellipseRadiusKm?: number): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   fitCanvas(canvas);
@@ -79,12 +84,49 @@ function drawGlobalMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site:
   ctx.lineTo(canvas.width, canvas.height / 2);
   ctx.stroke();
 
+  // Draw landing ellipse if requested
+  if (ellipseRadiusKm != null && ellipseRadiusKm > 0) {
+    drawEllipse(ctx, canvas.width, canvas.height, site.eastLonDeg, site.latDeg, ellipseRadiusKm);
+  }
+
   for (const preset of PRESET_SITES) {
     const uv = lonLatToEquirectUv(preset.eastLonDeg, preset.latDeg);
     drawMarker(ctx, uv.u * canvas.width, uv.v * canvas.height, preset.id === site.id);
   }
   const uv = lonLatToEquirectUv(site.eastLonDeg, site.latDeg);
   drawMarker(ctx, uv.u * canvas.width, uv.v * canvas.height, true);
+}
+
+function drawEllipse(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  centerLon: number,
+  centerLat: number,
+  radiusKm: number,
+): void {
+  // Convert km to degrees
+  const kmPerDegLat = 29.7;
+  const kmPerDegLon = 29.7 * Math.cos((centerLat * Math.PI) / 180);
+  const dLatDeg = radiusKm / kmPerDegLat;
+  const dLonDeg = kmPerDegLon > 0.1 ? radiusKm / kmPerDegLon : dLatDeg * 2;
+
+  const centerUv = lonLatToEquirectUv(centerLon, centerLat);
+  const edgeUv = lonLatToEquirectUv(centerLon + dLonDeg, centerLat + dLatDeg);
+
+  const rx = Math.abs(edgeUv.u - centerUv.u) * width;
+  const ry = Math.abs(edgeUv.v - centerUv.v) * height;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(centerUv.u * width, centerUv.v * height, rx, ry, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(245,158,11,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(245,158,11,0.08)";
+  ctx.fill();
+  ctx.restore();
 }
 
 const polarCache = new Map<string, HTMLCanvasElement>();
@@ -126,7 +168,7 @@ function polarTerrain(image: HTMLImageElement, width: number, height: number): H
   return off;
 }
 
-function drawPolarMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: LunarSite): void {
+function drawPolarMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: LunarSite, ellipseRadiusKm?: number): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   fitCanvas(canvas);
@@ -149,6 +191,11 @@ function drawPolarMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: 
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.stroke();
 
+  // Draw landing ellipse if requested and site is in polar region
+  if (ellipseRadiusKm != null && ellipseRadiusKm > 0 && site.latDeg <= POLAR_LAT_MIN) {
+    drawPolarEllipse(ctx, width, height, site.eastLonDeg, site.latDeg, ellipseRadiusKm);
+  }
+
   for (const preset of PRESET_SITES) {
     const polar = lonLatToSouthPolar(preset.eastLonDeg, preset.latDeg, POLAR_LAT_MIN);
     if (!polar) continue;
@@ -158,6 +205,35 @@ function drawPolarMap(canvas: HTMLCanvasElement, image: HTMLImageElement, site: 
   if (selected) {
     drawMarker(ctx, selected.x * width, selected.y * height, true);
   }
+}
+
+function drawPolarEllipse(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  centerLon: number,
+  centerLat: number,
+  radiusKm: number,
+): void {
+  const kmPerDegLat = 29.7;
+  const dLatDeg = radiusKm / kmPerDegLat;
+
+  const center = lonLatToSouthPolar(centerLon, centerLat, POLAR_LAT_MIN);
+  const edge = lonLatToSouthPolar(centerLon, centerLat - dLatDeg, POLAR_LAT_MIN);
+  if (!center || !edge) return;
+
+  const r = Math.abs(edge.y - center.y) * height;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(center.x * width, center.y * height, r, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(245,158,11,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(245,158,11,0.08)";
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, selected: boolean): void {

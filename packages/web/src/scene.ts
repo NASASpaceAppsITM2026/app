@@ -162,6 +162,7 @@ export class LunarScene {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private moonMesh!: THREE.Mesh;
+  private terminatorMesh!: THREE.Mesh;
   private sunMesh!: THREE.Mesh;
   private earthMesh!: THREE.Mesh;
   private siteMarker!: THREE.Mesh;
@@ -227,6 +228,20 @@ export class LunarScene {
     this.moonMesh.castShadow = true;
     this.moonMesh.receiveShadow = true;
     this.scene.add(this.moonMesh);
+
+    // Terminator overlay — dark hemisphere showing night side (only the back half)
+    const terminatorGeometry = new THREE.SphereGeometry(
+      MOON_RADIUS_KM * OVERVIEW_SCALE * 1.002, 64, 32, 0, Math.PI,
+    );
+    const terminatorMaterial = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.FrontSide,
+      depthWrite: false,
+    });
+    this.terminatorMesh = new THREE.Mesh(terminatorGeometry, terminatorMaterial);
+    this.scene.add(this.terminatorMesh);
 
     // Sun
     const sunScale = SUN_RADIUS_KM * OVERVIEW_SCALE * 0.01;
@@ -447,6 +462,12 @@ export class LunarScene {
 
     // Update sun light direction
     this.sunLight.position.copy(this.sunMesh.position);
+
+    // Update terminator — rotate so dark side faces away from Sun
+    const sunDir = this.sunMesh.position.clone().normalize();
+    const terminatorQuat = new THREE.Quaternion();
+    terminatorQuat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), sunDir);
+    this.terminatorMesh.quaternion.copy(terminatorQuat);
 
     // Position Earth based on sky state
     const earthAzRad = ((this.skyState.earthAzimuthDeg - 90) * Math.PI) / 180;

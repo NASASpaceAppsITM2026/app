@@ -191,13 +191,18 @@ function buildLeftSidebar(): HTMLElement {
     class: "w-full rounded-md bg-[var(--color-bg-input)] border border-[var(--color-border)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-border-focus)]",
     "aria-label": "Select landing site",
   });
+  // Add "Custom" option first
+  const customOpt = el("option", { value: "custom" }, `Custom (${state.site.latDeg}°, ${state.site.eastLonDeg}°)`);
+  siteSelect.appendChild(customOpt);
   for (const site of PRESET_SITES) {
     const opt = el("option", { value: site.id }, `${siteLabel(site.id)} (${site.latDeg}°, ${site.eastLonDeg}°)`);
     if (site.id === state.site.id) opt.setAttribute("selected", "");
     siteSelect.appendChild(opt);
   }
   (siteSelect as HTMLSelectElement).addEventListener("change", (e) => {
-    const selected = PRESET_SITES.find((s) => s.id === (e.target as HTMLSelectElement).value);
+    const val = (e.target as HTMLSelectElement).value;
+    if (val === "custom") return; // custom coords set via inputs below
+    const selected = PRESET_SITES.find((s) => s.id === val);
     if (selected) {
       state = { ...state, site: selected };
       syncUrl();
@@ -228,7 +233,7 @@ function buildLeftSidebar(): HTMLElement {
   coordRow.appendChild(latInput);
 
   const applyBtn = el("button", {
-    class: "col-span-2 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white hover:bg-blue-600 transition-colors",
+    class: "col-span-2 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white hover:bg-[var(--color-warning)] transition-colors",
     "aria-label": "Apply custom coordinates",
   }, "Apply");
   const applyCustom = () => {
@@ -245,6 +250,105 @@ function buildLeftSidebar(): HTMLElement {
   latInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyCustom(); } });
   coordRow.appendChild(applyBtn);
   controls.appendChild(coordRow);
+
+  // Landing ellipse (robustness) controls
+  const ellipseSection = el("div", { class: "pt-2 border-t border-[var(--color-border)]" });
+  ellipseSection.appendChild(el("h3", { class: "text-[10px] font-medium mb-1 text-[var(--color-text-muted)] uppercase tracking-wider" }, "Landing area"));
+  const ellipseRow = el("div", { class: "flex items-center gap-2" });
+  const ellipseInput = el("input", {
+    type: "number",
+    id: "ellipse-km",
+    min: "0.1",
+    max: "50",
+    step: "0.5",
+    value: "2",
+    class: "w-16 rounded-md bg-[var(--color-bg-input)] border border-[var(--color-border)] px-1.5 py-0.5 text-xs text-[var(--color-text-primary)]",
+    "aria-label": "Landing ellipse radius km",
+  }) as HTMLInputElement;
+  ellipseRow.appendChild(el("label", { class: "text-[10px] text-[var(--color-text-muted)]" }, "Radius km:"));
+  ellipseRow.appendChild(ellipseInput);
+  const runEllipseBtn = el("button", {
+    class: "rounded-md bg-[var(--color-accent)] px-2 py-0.5 text-[10px] font-medium text-white hover:bg-[var(--color-warning)] transition-colors",
+    "aria-label": "Check landing area robustness",
+  }, "Check area");
+  ellipseRow.appendChild(runEllipseBtn);
+  ellipseSection.appendChild(ellipseRow);
+
+  const ellipseResults = el("div", {
+    id: "ellipse-results",
+    class: "mt-2 text-[10px] text-[var(--color-text-secondary)]",
+    role: "region",
+    "aria-label": "Landing area robustness results",
+    "aria-live": "polite",
+  });
+  ellipseSection.appendChild(ellipseResults);
+  controls.appendChild(ellipseSection);
+
+  // Wire up ellipse check button
+  const runEllipse = async () => {
+    const radiusKm = parseFloat(ellipseInput.value) || 2;
+    clear(ellipseResults);
+    ellipseResults.appendChild(el("p", { class: "text-[var(--color-text-muted)]" }, "Checking area..."));
+
+    try {
+      const { checkLandingArea } = await import("./science");
+      const result = await checkLandingArea(state.site, state.dateUtc, 12, radiusKm, state.constraints);
+
+      clear(ellipseResults);
+      const summary = el("div", { class: "space-y-1" });
+
+      // Meets / misses summary
+      const meetsPct = (result.meets / result.total * 100).toFixed(0);
+      const meetsBar = el("div", { class: "flex items-center gap-2" });
+      meetsBar.appendChild(el("span", { class: "text-[var(--color-meets)] font-medium w-12" }, `${meetsPct}%`));
+      const barBg = el("div", { class: "flex-1 h-2 rounded-full bg-[var(--color-bg-elevated)] overflow-hidden" });
+      const barFill = el("div", {
+        class: "h-full rounded-full",
+        style: `width: ${meetsPct}%; background-color: var(--color-meets);`,
+      });
+      barBg.appendChild(barFill);
+      meetsBar.appendChild(barBg);
+      summary.appendChild(meetsBar);
+
+      // Detail
+      const detail = el("div", { class: "mt-1" });
+      detail.appendChild(el("span", { class: "text-[var(--color-meets)]" }, `${result.meets} meets`));
+      detail.appendChild(el("span", { class: "text-[var(--color-text-muted)] mx-1" }, "/"));
+      detail.appendChild(el("span", { class: "text-[var(--color-misses)]" }, `${result.misses} misses`));
+      if (result.unknown > 0) {
+        detail.appendChild(el("span", { class: "text-[var(--color-text-muted)] mx-1" }, "/"));
+        detail.appendChild(el("span", { class: "text-[var(--color-unknown)]" }, `${result.unknown} ?`));
+      }
+      detail.appendChild(el("span", { class: "text-[var(--color-text-muted)]" }, ` of ${result.total} points`));
+      summary.appendChild(detail);
+
+      // Sun elevation range
+      const sunRange = el("div", { class: "mt-1 text-[var(--color-sun)]" });
+      sunRange.appendChild(el("span", {}, `Sun: ${result.sunElevMin.toFixed(1)}° – ${result.sunElevMax.toFixed(1)}°`));
+      summary.appendChild(sunRange);
+
+      // Earth elevation range
+      const earthRange = el("div", { class: "mt-0.5 text-[var(--color-earth)]" });
+      earthRange.appendChild(el("span", {}, `Earth: ${result.earthElevMin.toFixed(1)}° – ${result.earthElevMax.toFixed(1)}°`));
+      summary.appendChild(earthRange);
+
+      // Method note
+      const note = el("div", { class: "mt-1 text-[var(--color-text-muted)]" },
+        `Grid: ${result.gridPoints} points within ${radiusKm} km`);
+      summary.appendChild(note);
+
+      ellipseResults.appendChild(summary);
+
+      // Draw ellipse on map
+      updateMapWithEllipse(radiusKm);
+    } catch (err) {
+      clear(ellipseResults);
+      ellipseResults.appendChild(el("p", { class: "text-[var(--color-misses)]" }, `Error: ${err}`));
+    }
+  };
+
+  runEllipseBtn.addEventListener("click", runEllipse);
+  ellipseInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runEllipse(); } });
 
   // Date picker
   const dateInput = el("input", {
@@ -346,6 +450,17 @@ function buildRightPanel(): HTMLElement {
   skySection.appendChild(el("h2", { class: "text-[10px] font-medium mb-2 text-[var(--color-text-muted)] uppercase tracking-wider" }, "Sky State"));
   const skyMetrics = el("div", { id: "sky-metrics", class: "grid grid-cols-2 gap-2" });
   skySection.appendChild(skyMetrics);
+
+  // Power and communication assessment
+  const powerSection = el("div", {
+    id: "power-section",
+    class: "p-3 border-b border-[var(--color-border)]",
+  });
+  powerSection.appendChild(el("h2", { class: "text-[10px] font-medium mb-2 text-[var(--color-text-muted)] uppercase tracking-wider" }, "Assessment"));
+  const powerMetrics = el("div", { id: "power-metrics", class: "space-y-2" });
+  powerSection.appendChild(powerMetrics);
+  panel.appendChild(powerSection);
+
   panel.appendChild(skySection);
 
   // Horizon chart section
@@ -497,6 +612,19 @@ function buildBottomBar(): HTMLElement {
       if (unknown > 0) summary.appendChild(el("span", { class: "text-[var(--color-unknown)] font-medium" }, `${unknown} ?`));
       slipResults.appendChild(summary);
 
+      // Next suitable date after current
+      const nextSuitable = samples.find((s) => s.verdict === "meets" && s.dateUtc > state.dateUtc);
+      if (nextSuitable) {
+        const daysAway = Math.round((Date.parse(nextSuitable.dateUtc) - Date.parse(state.dateUtc)) / 86_400_000);
+        const nextRow = el("div", {
+          class: "px-2 py-1 text-[10px] border-b border-[var(--color-border)] bg-[var(--color-meets)] bg-opacity-10 flex items-center gap-2",
+        });
+        nextRow.appendChild(el("span", { class: "text-[var(--color-meets)] font-medium" }, "Next suitable:"));
+        nextRow.appendChild(el("span", { class: "font-mono" }, nextSuitable.dateUtc));
+        nextRow.appendChild(el("span", { class: "text-[var(--color-text-muted)]" }, `(+${daysAway} days)`));
+        slipResults.appendChild(nextRow);
+      }
+
       // Table
       const table = el("table", { class: "w-full text-[10px]", "aria-label": "Slip window results" });
       const thead = el("thead", {});
@@ -573,9 +701,15 @@ function renderTopBar(): HTMLElement {
 /* ── Update functions for re-renders ── */
 
 function updateDashboard() {
-  // Update site selector
+  // Update site selector — select preset or "custom"
   const siteSelect = document.getElementById("site-select") as HTMLSelectElement | null;
-  if (siteSelect) siteSelect.value = state.site.id;
+  if (siteSelect) {
+    const matched = PRESET_SITES.find((s) => s.id === state.site.id);
+    siteSelect.value = matched ? state.site.id : "custom";
+    // Update the custom option label with current coords
+    const customOpt = siteSelect.querySelector('option[value="custom"]') as HTMLOptionElement | null;
+    if (customOpt) customOpt.label = `Custom (${state.site.latDeg}°, ${state.site.eastLonDeg}°)`;
+  }
 
   // Update coordinate inputs
   const lonInput = document.querySelector("#left-sidebar input[placeholder='Lon °E']") as HTMLInputElement | null;
@@ -598,10 +732,17 @@ function updateDashboard() {
   if (earthLink) earthLink.href = horizonsVerifyUrl(state.site, state.dateUtc, "earth");
 }
 
+let lastEllipseRadiusKm: number | undefined = undefined;
+
 function updateMap() {
   if (mapHandles) {
-    drawMaps(mapHandles, state.site);
+    drawMaps(mapHandles, state.site, lastEllipseRadiusKm);
   }
+}
+
+function updateMapWithEllipse(radiusKm: number) {
+  lastEllipseRadiusKm = radiusKm;
+  updateMap();
 }
 
 async function updateRightPanel() {
@@ -624,6 +765,60 @@ async function updateRightPanel() {
       item.appendChild(el("div", { class: `text-sm font-mono font-semibold ${m.color}` }, m.value));
       skyMetrics.appendChild(item);
     }
+  }
+
+  // Power and communication assessment
+  const powerMetrics = document.getElementById("power-metrics");
+  if (powerMetrics) {
+    clear(powerMetrics);
+    const { horizontalPowerProxy, maskElevationAt } = await import("./science");
+
+    // Solar power proxy
+    const sunAboveMask = mask
+      ? sky.sunElevationDeg > maskElevationAt(mask, sky.sunAzimuthDeg)
+      : sky.sunElevationDeg > 0;
+    const powerProxy = horizontalPowerProxy(sky.sunElevationDeg, sunAboveMask);
+    const powerPct = Math.round(powerProxy * 100);
+
+    const powerItem = el("div", { class: "space-y-1" });
+    const powerLabel = el("div", { class: "flex items-center justify-between" });
+    powerLabel.appendChild(el("span", { class: "text-[10px] text-[var(--color-text-muted)]" }, "Solar power proxy"));
+    powerLabel.appendChild(el("span", { class: "text-[10px] font-mono font-semibold text-[var(--color-sun)]" }, `${powerPct}%`));
+    powerItem.appendChild(powerLabel);
+
+    // Power bar
+    const powerBarBg = el("div", { class: "h-2 rounded-full bg-[var(--color-bg-elevated)] overflow-hidden" });
+    const powerBarFill = el("div", {
+      class: "h-full rounded-full transition-all",
+      style: `width: ${powerPct}%; background-color: ${powerPct > 0 ? "var(--color-sun)" : "var(--color-text-muted)"};`,
+    });
+    powerBarBg.appendChild(powerBarFill);
+    powerItem.appendChild(powerBarBg);
+
+    // Light status
+    const lightStatus = sky.sunElevationDeg > 0 ? "☀ Light" : "🌑 Dark";
+    const lightColor = sky.sunElevationDeg > 0 ? "text-[var(--color-sun)]" : "text-[var(--color-text-muted)]";
+    powerItem.appendChild(el("div", { class: `text-[10px] ${lightColor}` }, lightStatus));
+    powerMetrics.appendChild(powerItem);
+
+    // Communication status
+    const commItem = el("div", { class: "mt-2 space-y-1" });
+    const commLabel = el("div", { class: "flex items-center justify-between" });
+    commLabel.appendChild(el("span", { class: "text-[10px] text-[var(--color-text-muted)]" }, "Earth communication"));
+    const earthAboveMask = mask
+      ? sky.earthElevationDeg > maskElevationAt(mask, sky.earthAzimuthDeg)
+      : sky.earthElevationDeg > 0;
+    const commStatus = earthAboveMask ? "Connected" : "Blocked";
+    const commColor = earthAboveMask ? "text-[var(--color-meets)]" : "text-[var(--color-misses)]";
+    commLabel.appendChild(el("span", { class: `text-[10px] font-medium ${commColor}` }, commStatus));
+    commItem.appendChild(commLabel);
+
+    if (mask) {
+      const maskElev = maskElevationAt(mask, sky.earthAzimuthDeg);
+      commItem.appendChild(el("div", { class: "text-[9px] text-[var(--color-text-muted)]" },
+        `Earth ${sky.earthElevationDeg.toFixed(1)}° vs terrain ${maskElev.toFixed(1)}°`));
+    }
+    powerMetrics.appendChild(commItem);
   }
 
   // Horizon chart
