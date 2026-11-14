@@ -105,9 +105,26 @@ export function computeSkyState(
   const earthSegment = selectSegment(validated, BODY_PAIR_MOON_TO_EARTH, epochTdbSec);
   const sunFit = evaluateChebyshev(sunSegment, epochTdbSec);
   const earthFit = evaluateChebyshev(earthSegment, epochTdbSec);
-  const sunDirection = toUnitVector(sunFit.direction);
-  const earthDirection = toUnitVector(earthFit.direction);
   const frame = localFrame(site);
+  const sitePosKm: [number, number, number] = [
+    MOON_SPHERE_RADIUS_KM * frame.up[0],
+    MOON_SPHERE_RADIUS_KM * frame.up[1],
+    MOON_SPHERE_RADIUS_KM * frame.up[2],
+  ];
+  const sunCenterDir = toUnitVector(sunFit.direction);
+  const sunVecKm: [number, number, number] = [
+    sunCenterDir[0] * sunFit.distanceKm - sitePosKm[0],
+    sunCenterDir[1] * sunFit.distanceKm - sitePosKm[1],
+    sunCenterDir[2] * sunFit.distanceKm - sitePosKm[2],
+  ];
+  const earthCenterDir = toUnitVector(earthFit.direction);
+  const earthVecKm: [number, number, number] = [
+    earthCenterDir[0] * earthFit.distanceKm - sitePosKm[0],
+    earthCenterDir[1] * earthFit.distanceKm - sitePosKm[1],
+    earthCenterDir[2] * earthFit.distanceKm - sitePosKm[2],
+  ];
+  const sunDirection = toUnitVector(sunVecKm);
+  const earthDirection = toUnitVector(earthVecKm);
   return {
     epochTdbSec,
     sunAzimuthDeg: azimuthDeg(sunDirection, frame),

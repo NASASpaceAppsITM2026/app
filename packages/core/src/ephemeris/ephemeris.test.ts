@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import artifact from "../../../../tests/fixtures/synthetic/ephemeris_v1.json";
-import { configureEphemerisArtifact, resetConfiguredEphemerisArtifact, skyAt } from "./ephemeris";
+import {
+  MOON_SPHERE_RADIUS_KM,
+  configureEphemerisArtifact,
+  resetConfiguredEphemerisArtifact,
+  skyAt,
+} from "./ephemeris";
 import { validateEphemerisArtifact, type EphemerisArtifact } from "./artifact";
 
 // Supported ephemeris window of the synthetic `ephemeris_v1` fit, in TDB seconds
@@ -34,6 +39,18 @@ function localFrame(eastLonDeg: number, latDeg: number): Frame {
   return { up, east, north: cross };
 }
 
+function topocentricVector(
+  frame: Frame,
+  direction: readonly number[],
+  distanceKm: number,
+): [number, number, number] {
+  return [
+    direction[0] * distanceKm - MOON_SPHERE_RADIUS_KM * frame.up[0],
+    direction[1] * distanceKm - MOON_SPHERE_RADIUS_KM * frame.up[1],
+    direction[2] * distanceKm - MOON_SPHERE_RADIUS_KM * frame.up[2],
+  ];
+}
+
 function expectedAzimuthDeg(frame: Frame, direction: readonly number[]): number {
   const azimuthRad = Math.atan2(
     direction[0] * frame.east[0] + direction[1] * frame.east[1] + direction[2] * frame.east[2],
@@ -44,7 +61,8 @@ function expectedAzimuthDeg(frame: Frame, direction: readonly number[]): number 
 }
 
 function expectedElevationDeg(frame: Frame, direction: readonly number[]): number {
-  const sinElevation = direction[0] * frame.up[0] + direction[1] * frame.up[1] + direction[2] * frame.up[2];
+  const norm = Math.hypot(direction[0], direction[1], direction[2]);
+  const sinElevation = (direction[0] * frame.up[0] + direction[1] * frame.up[1] + direction[2] * frame.up[2]) / norm;
   return (Math.asin(Math.min(1, Math.max(-1, sinElevation))) * 180) / Math.PI;
 }
 
@@ -55,10 +73,12 @@ describe("ephemeris skyAt over synthetic fits", () => {
 
     expect(result.epochTdbSec).toBe(EPOCH_MID_TDB_SEC);
     const frame = localFrame(0, -89.5);
-    expect(result.sunAzimuthDeg).toBeCloseTo(expectedAzimuthDeg(frame, [0, 0, 1]), 6);
-    expect(result.sunElevationDeg).toBeCloseTo(expectedElevationDeg(frame, [0, 0, 1]), 6);
-    expect(result.earthAzimuthDeg).toBeCloseTo(expectedAzimuthDeg(frame, [1, 0, 0]), 6);
-    expect(result.earthElevationDeg).toBeCloseTo(expectedElevationDeg(frame, [1, 0, 0]), 6);
+    const sunTopo = topocentricVector(frame, [0, 0, 1], 384400.0);
+    const earthTopo = topocentricVector(frame, [1, 0, 0], 363000.0);
+    expect(result.sunAzimuthDeg).toBeCloseTo(expectedAzimuthDeg(frame, sunTopo), 6);
+    expect(result.sunElevationDeg).toBeCloseTo(expectedElevationDeg(frame, sunTopo), 6);
+    expect(result.earthAzimuthDeg).toBeCloseTo(expectedAzimuthDeg(frame, earthTopo), 6);
+    expect(result.earthElevationDeg).toBeCloseTo(expectedElevationDeg(frame, earthTopo), 6);
   });
 
   it("accepts epochs at both ends of the supported window", () => {
