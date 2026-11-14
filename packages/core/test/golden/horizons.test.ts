@@ -5,6 +5,8 @@ import southPoleSun from "../../../../tests/fixtures/horizons/south_pole_Sun_202
 import southPoleEarth from "../../../../tests/fixtures/horizons/south_pole_Earth_2026.json";
 import southPoleSummerSun from "../../../../tests/fixtures/horizons/south_pole_summer_Sun_2026.json";
 import southPoleSummerEarth from "../../../../tests/fixtures/horizons/south_pole_summer_Earth_2026.json";
+import ephemeris2026 from "../../../../tests/fixtures/ephemeris_2026.json";
+import { configureEphemerisArtifact, skyAt } from "../../src/ephemeris";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -85,5 +87,51 @@ describe("JPL Horizons golden validation fixtures and metrics", () => {
     expect(angularSeparationDeg(0, 0, 90, 0)).toBeCloseTo(90, 6);
     expect(angularSeparationDeg(0, 0, 0, 45)).toBeCloseTo(45, 6);
     expect(angularSeparationDeg(359.99, 10, 0.01, 10)).toBeLessThan(0.05);
+  });
+
+  describe("Golden test vs JPL Horizons (< 0.01 deg tolerance gate)", () => {
+    configureEphemerisArtifact(ephemeris2026 as any);
+
+    for (const { name, fixture } of fixtures) {
+      it(`validates ${name} within 0.01 deg tolerance against JPL Horizons`, () => {
+        const isSun = fixture.target.name === "Sun";
+        const site = {
+          id: fixture.site.id,
+          eastLonDeg: fixture.site.eastLonDeg,
+          latDeg: fixture.site.latDeg,
+        };
+
+        let maxSepDeg = 0;
+        let maxAzDiffDeg = 0;
+        let maxElDiffDeg = 0;
+
+        // Check every 10th sample across the 24-hour fixture (145 checks per fixture)
+        for (let i = 0; i < fixture.samples.length; i += 10) {
+          const s = fixture.samples[i];
+          const unixSec = Date.parse(s.timeUtc) / 1000;
+          // SPICE ET/TDB = (unixSec - 946728000) + 69.1827s in 2026
+          const epochTdbSec = unixSec - 946728000 + 69.1827;
+          const state = skyAt(site, epochTdbSec);
+
+          const compAz = isSun ? state.sunAzimuthDeg : state.earthAzimuthDeg;
+          const compEl = isSun ? state.sunElevationDeg : state.earthElevationDeg;
+
+          const azDiff = Math.abs(wrapAzimuthDiffDeg(compAz, s.azDeg));
+          const elDiff = Math.abs(compEl - s.elDeg);
+          const sep = angularSeparationDeg(compAz, compEl, s.azDeg, s.elDeg);
+
+          if (sep > maxSepDeg) maxSepDeg = sep;
+          if (azDiff > maxAzDiffDeg) maxAzDiffDeg = azDiff;
+          if (elDiff > maxElDiffDeg) maxElDiffDeg = elDiff;
+
+          // Non-polar or when elevation is not near +/- 90, azimuth must match < 0.01 deg
+          if (Math.abs(s.elDeg) < 89.0) {
+            expect(azDiff).toBeLessThan(0.01);
+          }
+          expect(elDiff).toBeLessThan(0.01);
+          expect(sep).toBeLessThan(0.01);
+        }
+      });
+    }
   });
 });
