@@ -25,6 +25,16 @@ export const PRESET_SITES: LunarSite[] = [
   { id: "south_pole_895", eastLonDeg: 0.0, latDeg: -89.5 },
   { id: "south_pole_summer", eastLonDeg: 180.0, latDeg: -89.5 },
   { id: "apollo11", eastLonDeg: 23.45, latDeg: 0.674 },
+  // Apollo Program landing sites (additional lunar landing sites).
+  { id: "apollo12", eastLonDeg: 136.21, latDeg: 31.95 },
+  { id: "apollo14", eastLonDeg: 44.22, latDeg: 40.92 },
+  { id: "apollo15", eastLonDeg: 3.72, latDeg: 26.44 },
+  { id: "apollo17", eastLonDeg: 87.71, latDeg: 14.12 },
+  { id: "luna16", eastLonDeg: 93.89, latDeg: 31.17 },
+  // Additional Apollo and Luna landing sites (data‑only presets)
+  { id: "apollo16", eastLonDeg: 15.501, latDeg: -8.998 }, // Descartes Highlands
+  { id: "luna17", eastLonDeg: 30.8, latDeg: 26.9 }, // Mare Imbrium (Luna 17 rover)
+  { id: "luna20", eastLonDeg: 62.2, latDeg: 0.7 } // Luna 20, Mare Serenitatis
 ];
 
 /** Default site: Shackleton connecting ridge (Artemis candidate). */
@@ -167,6 +177,14 @@ export function siteLabel(id: string): string {
     south_pole_895: "South Pole -89.5° (Prime Meridian)",
     south_pole_summer: "South Pole -89.5° (180°E)",
     apollo11: "Apollo 11 Landing Site",
+    apollo12: "Apollo 12 Landing Site",
+    apollo14: "Apollo 14 Landing Site",
+    apollo15: "Apollo 15 Landing Site",
+    apollo16: "Apollo 16 Landing Site",
+    apollo17: "Apollo 17 Landing Site",
+    luna16: "Luna 16 Landing Site",
+    luna17: "Luna 17 Landing Site",
+    luna20: "Luna 20 Landing Site",
   };
   if (map[id]) return map[id];
   return id

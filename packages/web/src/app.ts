@@ -444,7 +444,7 @@ async function handleUserQuerySubmit(query: string) {
   renderIsleThread(res.actionToTrigger);
 }
 
-function renderIsleThread(actionTrigger?: "slip-search" | "area-check") {
+function renderIsleThread(actionTrigger?: "slip-search" | "area-check" | "best-arrival" | "score-sites") {
   const box = document.getElementById("isle-response-box");
   if (!box) return;
   clear(box);
@@ -514,6 +514,10 @@ function renderIsleThread(actionTrigger?: "slip-search" | "area-check") {
     runInlineSlipSearch(box);
   } else if (actionTrigger === "area-check") {
     runInlineAreaCheck(box);
+  } else if (actionTrigger === "best-arrival") {
+    runInlineBestArrival(box);
+  } else if (actionTrigger === "score-sites") {
+    runInlineScoreSites(box);
   }
 }
 
@@ -569,6 +573,125 @@ async function runInlineAreaCheck(container: HTMLElement) {
       el("span", { class: "font-mono text-[9px] text-[var(--color-sun)]" }, `Sun: ${res.sunElevMin.toFixed(1)}° – ${res.sunElevMax.toFixed(1)}°`),
     );
     resultsDiv.appendChild(summary);
+  } catch (e) {
+    resultsDiv.textContent = `Error: ${e}`;
+  }
+}
+
+async function runInlineBestArrival(container: HTMLElement) {
+  const resultsDiv = el("div", { class: "pt-1 text-[10px] text-[var(--color-accent)] animate-pulse" }, "Finding best arrival day...");
+  container.appendChild(resultsDiv);
+
+  try {
+    const { findBestArrivalDay } = await import("./science");
+    const stayDays = 14;
+    const startMs = Date.parse(`${state.dateUtc}T00:00:00Z`);
+    const endMs = startMs + 60 * 86_400_000; // scan 60 days ahead
+    const endDate = new Date(endMs).toISOString().slice(0, 10);
+
+    const candidates = await findBestArrivalDay(
+      state.site, state.dateUtc, endDate, stayDays, state.hourUtc ?? 12, state.constraints
+    );
+
+    clear(resultsDiv);
+    resultsDiv.classList.remove("animate-pulse");
+
+    if (candidates.length === 0) {
+      resultsDiv.textContent = "No candidates found in the scan range.";
+      return;
+    }
+
+    const top = candidates[0];
+    const banner = el("div", { class: "p-2 rounded bg-[var(--color-bg-elevated)] border border-[var(--color-border)] space-y-1.5" },
+      el("div", { class: "flex items-center justify-between" },
+        el("span", { class: "font-bold text-[var(--color-meets)]" }, `Best: ${top.dateUtc}`),
+        el("button", {
+          class: "px-2 py-0.5 rounded bg-[var(--color-meets)] text-white font-semibold text-[10px]",
+        }, "Jump"),
+      ),
+      el("div", { class: "flex items-center justify-between text-[10px] font-mono" },
+        el("span", { class: "text-[var(--color-sun)]" }, `Avg Sun: ${top.avgSunElevationDeg.toFixed(1)}°`),
+        el("span", { class: "text-[var(--color-earth)]" }, `Avg Earth: ${top.avgEarthElevationDeg.toFixed(1)}°`),
+      ),
+      el("div", { class: "flex items-center justify-between text-[10px] text-[var(--color-text-muted)]" },
+        el("span", {}, `${top.sunlitDays}/${stayDays} sunlit days`),
+        el("span", {}, `${top.earthVisibleDays}/${stayDays} comms days`),
+      ),
+      el("div", { class: "text-[10px] font-mono text-[var(--color-accent)]" }, `Score: ${top.score}/100`),
+    );
+
+    banner.querySelector("button")?.addEventListener("click", () => {
+      state = { ...state, dateUtc: top.dateUtc };
+      syncUrl();
+      void render();
+      showToast(`Jumped to ${top.dateUtc}`);
+    });
+
+    resultsDiv.appendChild(banner);
+
+    // Show top 3
+    if (candidates.length > 1) {
+      const top3 = candidates.slice(1, 4);
+      const list = el("div", { class: "mt-1.5 space-y-1" });
+      for (const c of top3) {
+        const row = el("div", { class: "flex items-center justify-between text-[10px] font-mono p-1.5 rounded bg-[var(--color-bg-input)]" },
+          el("span", { class: c.meetsConstraints ? "text-[var(--color-meets)]" : "text-[var(--color-misses)]" }, c.dateUtc),
+          el("span", { class: "text-[var(--color-text-muted)]" }, `Score: ${c.score}`),
+        );
+        list.appendChild(row);
+      }
+      resultsDiv.appendChild(list);
+    }
+  } catch (e) {
+    resultsDiv.textContent = `Error: ${e}`;
+  }
+}
+
+async function runInlineScoreSites(container: HTMLElement) {
+  const resultsDiv = el("div", { class: "pt-1 text-[10px] text-[var(--color-accent)] animate-pulse" }, "Scoring candidate sites...");
+  container.appendChild(resultsDiv);
+
+  try {
+    const { scoreSites } = await import("./science");
+    const criteria = {
+      communication: 3,
+      sunlight: 4,
+      flatness: 2,
+      roughness: 2,
+      missionObjective: 3,
+    };
+
+    const results = await scoreSites(state.dateUtc, state.hourUtc ?? 12, criteria, state.constraints);
+    clear(resultsDiv);
+    resultsDiv.classList.remove("animate-pulse");
+
+    if (results.length === 0) {
+      resultsDiv.textContent = "No sites could be scored.";
+      return;
+    }
+
+    const top5 = results.slice(0, 5);
+    const list = el("div", { class: "space-y-1" });
+
+    for (let i = 0; i < top5.length; i++) {
+      const r = top5[i];
+      const row = el("div", { class: "flex items-center gap-2 p-1.5 rounded bg-[var(--color-bg-input)]" },
+        el("span", { class: `w-4 text-center font-bold text-[10px] ${i === 0 ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"}` }, `#${i + 1}`),
+        el("div", { class: "flex-1" },
+          el("div", { class: "flex items-center justify-between" },
+            el("span", { class: "text-[11px] font-semibold text-[var(--color-text-primary)]" }, siteLabel(r.site.id)),
+            el("span", { class: "font-mono text-[10px] font-bold text-[var(--color-accent)]" }, `${r.weightedScore}`),
+          ),
+          el("div", { class: "flex items-center gap-2 text-[9px] font-mono text-[var(--color-text-muted)]" },
+            el("span", { class: r.sunAboveMask ? "text-[var(--color-sun)]" : "text-[var(--color-misses)]" }, `Sun ${r.sunElevationDeg.toFixed(1)}°`),
+            el("span", { class: r.earthAboveMask ? "text-[var(--color-earth)]" : "text-[var(--color-misses)]" }, `Earth ${r.earthElevationDeg.toFixed(1)}°`),
+          ),
+        ),
+      );
+      list.appendChild(row);
+    }
+
+    resultsDiv.appendChild(list);
   } catch (e) {
     resultsDiv.textContent = `Error: ${e}`;
   }

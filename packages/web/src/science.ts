@@ -6,6 +6,7 @@
 
 import type { Constraint, HorizonMask, LunarSite, SkyState, Verdict } from "core";
 import { mockHorizonMaskFor, mockSkyAt } from "./mocks";
+import { PRESET_SITES } from "./scenario";
 
 const J2000_UTC_MS = 946_684_800_000;
 
@@ -453,6 +454,204 @@ export async function checkLandingArea(
     earthElevMax: Number.isFinite(earthElevMax) ? earthElevMax : 0,
     gridPoints: points.length,
   };
+}
+
+/**
+ * Stay duration + best arrival day.
+ * Scans a date range for the best landing day given a stay duration.
+ * The best day is the one where, over the entire stay period, the site has
+ * the highest average sunlight and Earth visibility.
+ */
+export interface StayWindowCandidate {
+  readonly dateUtc: string;
+  readonly stayDays: number;
+  readonly avgSunElevationDeg: number;
+  readonly avgEarthElevationDeg: number;
+  readonly sunlitDays: number;
+  readonly earthVisibleDays: number;
+  readonly meetsConstraints: boolean;
+  readonly score: number; // 0-100 composite score
+}
+
+export async function findBestArrivalDay(
+  site: LunarSite,
+  startDateUtc: string,
+  endDateUtc: string,
+  stayDays: number,
+  hourUtc: number,
+  constraints: readonly Constraint[],
+): Promise<StayWindowCandidate[]> {
+  const { mask } = await horizonMaskForSite(site);
+  const startMs = Date.parse(`${startDateUtc}T00:00:00Z`);
+  const endMs = Date.parse(`${endDateUtc}T00:00:00Z`);
+  const candidates: StayWindowCandidate[] = [];
+
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    const dateUtc = new Date(ms).toISOString().slice(0, 10);
+    let totalSunElev = 0;
+    let totalEarthElev = 0;
+    let sunlitDays = 0;
+    let earthVisibleDays = 0;
+    let allMeet = true;
+
+    for (let d = 0; d < stayDays; d++) {
+      const dayMs = ms + d * 86_400_000;
+      const dayDate = new Date(dayMs).toISOString().slice(0, 10);
+      let sky: SkyState;
+      try {
+        sky = await skyAtForDate(site, dayDate, hourUtc);
+      } catch {
+        allMeet = false;
+        break;
+      }
+
+      totalSunElev += sky.sunElevationDeg;
+      totalEarthElev += sky.earthElevationDeg;
+
+      const sunMaskElev = maskElevationAt(mask, sky.sunAzimuthDeg);
+      const earthMaskElev = maskElevationAt(mask, sky.earthAzimuthDeg);
+
+      if (sky.sunElevationDeg > sunMaskElev) sunlitDays++;
+      if (sky.earthElevationDeg > earthMaskElev) earthVisibleDays++;
+
+      const rows = evaluateUiConstraints(constraints, sky, mask);
+      if (rows.some((r) => r.verdict === "misses")) allMeet = false;
+    }
+
+    if (!Number.isFinite(totalSunElev)) continue;
+
+    const avgSunElev = totalSunElev / stayDays;
+    const avgEarthElev = totalEarthElev / stayDays;
+
+    // Score: weighted composite (0-100)
+    // Sunlight: 40% weight (higher elevation = better)
+    // Earth comms: 30% weight (higher elevation = better)
+    // Constraint meets: 30% weight (binary bonus)
+    const sunScore = Math.max(0, Math.min(100, (avgSunElev + 2) * 10)); // -2° to +8° maps to 0-100
+    const earthScore = Math.max(0, Math.min(100, (avgEarthElev + 2) * 10));
+    const constraintScore = allMeet ? 100 : 0;
+    const score = Math.round(sunScore * 0.4 + earthScore * 0.3 + constraintScore * 0.3);
+
+    candidates.push({
+      dateUtc,
+      stayDays,
+      avgSunElevationDeg: avgSunElev,
+      avgEarthElevationDeg: avgEarthElev,
+      sunlitDays,
+      earthVisibleDays,
+      meetsConstraints: allMeet,
+      score,
+    });
+  }
+
+  // Sort by score descending
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+/**
+ * Weighted multi-criteria site scoring.
+ * Evaluates all preset sites at a given date and returns ranked results.
+ */
+export interface SiteScoreCriteria {
+  readonly communication: number; // weight 1-5
+  readonly sunlight: number; // weight 1-5
+  readonly flatness: number; // weight 1-5 (placeholder — no terrain slope data)
+  readonly roughness: number; // weight 1-5 (placeholder — no terrain slope data)
+  readonly missionObjective: number; // weight 1-5 (e.g. south pole proximity)
+}
+
+export interface SiteScoreResult {
+  readonly site: LunarSite;
+  readonly scores: {
+    readonly communication: number;
+    readonly sunlight: number;
+    readonly flatness: number;
+    readonly roughness: number;
+    readonly missionObjective: number;
+  };
+  readonly weightedScore: number; // 0-100
+  readonly sunElevationDeg: number;
+  readonly earthElevationDeg: number;
+  readonly sunAboveMask: boolean;
+  readonly earthAboveMask: boolean;
+}
+
+export async function scoreSites(
+  dateUtc: string,
+  hourUtc: number,
+  criteria: SiteScoreCriteria,
+  constraints: readonly Constraint[],
+): Promise<SiteScoreResult[]> {
+  const results: SiteScoreResult[] = [];
+
+  for (const site of PRESET_SITES) {
+    let sky: SkyState;
+    try {
+      sky = await skyAtForDate(site, dateUtc, hourUtc);
+    } catch {
+      continue;
+    }
+
+    const { mask } = await horizonMaskForSite(site);
+    const sunMaskElev = maskElevationAt(mask, sky.sunAzimuthDeg);
+    const earthMaskElev = maskElevationAt(mask, sky.earthAzimuthDeg);
+    const sunAboveMask = sky.sunElevationDeg > sunMaskElev;
+    const earthAboveMask = sky.earthElevationDeg > earthMaskElev;
+
+    // Communication score: based on Earth elevation above mask
+    const commRaw = Math.max(0, Math.min(100, (sky.earthElevationDeg - earthMaskElev + 2) * 10));
+
+    // Sunlight score: based on Sun elevation above mask
+    const sunRaw = Math.max(0, Math.min(100, (sky.sunElevationDeg - sunMaskElev + 2) * 10));
+
+    // Flatness & roughness: placeholder (no slope data available)
+    // Use a neutral score based on latitude (equatorial sites tend to be flatter)
+    const absLat = Math.abs(site.latDeg);
+    const flatnessRaw = Math.max(0, 100 - absLat * 0.5); // simpler terrain near equator
+    const roughnessRaw = Math.max(0, 100 - absLat * 0.3);
+
+    // Mission objective: south pole proximity (for Artemis-style missions)
+    const southPoleProximity = Math.max(0, 100 - (90 + site.latDeg) * 1.5); // closer to -90 = higher score
+
+    // Weighted composite
+    const totalWeight =
+      criteria.communication +
+      criteria.sunlight +
+      criteria.flatness +
+      criteria.roughness +
+      criteria.missionObjective;
+
+    const weightedScore = totalWeight > 0
+      ? Math.round(
+          (commRaw * criteria.communication +
+            sunRaw * criteria.sunlight +
+            flatnessRaw * criteria.flatness +
+            roughnessRaw * criteria.roughness +
+            southPoleProximity * criteria.missionObjective) / totalWeight
+        )
+      : 0;
+
+    results.push({
+      site,
+      scores: {
+        communication: Math.round(commRaw),
+        sunlight: Math.round(sunRaw),
+        flatness: Math.round(flatnessRaw),
+        roughness: Math.round(roughnessRaw),
+        missionObjective: Math.round(southPoleProximity),
+      },
+      weightedScore,
+      sunElevationDeg: sky.sunElevationDeg,
+      earthElevationDeg: sky.earthElevationDeg,
+      sunAboveMask,
+      earthAboveMask,
+    });
+  }
+
+  // Sort by weighted score descending
+  results.sort((a, b) => b.weightedScore - a.weightedScore);
+  return results;
 }
 
 /** Horizons observer query for quantity 4 (azimuth/elevation), airless surface site. */

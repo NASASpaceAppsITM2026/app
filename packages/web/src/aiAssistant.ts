@@ -11,7 +11,6 @@
 import { type IconNode } from "lucide";
 import {
   Calendar,
-  Crosshair,
   Globe,
   MapPin,
   Rocket,
@@ -35,12 +34,21 @@ export const QUICK_ACTIONS: readonly QuickActionDef[] = [
   { id: "shackleton", label: "Shackleton Ridge", icon: MapPin, promptText: "Switch target to Shackleton Ridge", hint: "Switch site to Shackleton Connecting Ridge" },
   { id: "haworth", label: "Haworth Crater Rim", icon: MapPin, promptText: "Switch target to Haworth Crater Rim", hint: "Switch site to Haworth Crater Rim (-87.4°N)" },
   { id: "apollo11", label: "Apollo 11", icon: Rocket, promptText: "Fly camera to Apollo 11 site", hint: "Switch site to Apollo 11 (Mare Tranquillitatis)" },
+  { id: "apollo12", label: "Apollo 12", icon: Rocket, promptText: "Switch target to Apollo 12 Landing Site", hint: "Apollo 12 (Mare Tranquillitatis, 31.95°N, 136.21°E)" },
+  { id: "apollo14", label: "Apollo 14", icon: Rocket, promptText: "Switch target to Apollo 14 Landing Site", hint: "Apollo 14 (Fra Mauro, 40.92°N, 44.22°E)" },
+  { id: "apollo15", label: "Apollo 15", icon: Rocket, promptText: "Switch target to Apollo 15 Landing Site", hint: "Apollo 15 (Hadley–Apennine, 26.44°N, 3.72°E)" },
+  { id: "apollo16", label: "Apollo 16", icon: Rocket, promptText: "Switch target to Apollo 16 Landing Site", hint: "Apollo 16 (Descartes Highlands, 8.998°S, 15.501°E)" },
+  { id: "apollo17", label: "Apollo 17", icon: Rocket, promptText: "Switch target to Apollo 17 Landing Site", hint: "Apollo 17 (Taurus–Littrow, 14.12°N, 87.71°E)" },
+  { id: "luna16", label: "Luna 16", icon: Rocket, promptText: "Switch target to Luna 16 Landing Site", hint: "Luna 16 (Mare Fecunditatis, 31.17°N, 93.89°E)" },
+  { id: "luna17", label: "Luna 17", icon: Rocket, promptText: "Switch target to Luna 17 Landing Site", hint: "Luna 17 (Mare Imbrium, ~26.9°N, 30.8°E)" },
+  { id: "luna20", label: "Luna 20", icon: Rocket, promptText: "Switch target to Luna 20 Landing Site", hint: "Luna 20 (Mare Serenitatis, 0.7°N, 62.2°E)" },
   { id: "summer_solstice", label: "Summer Solstice", icon: Sun, promptText: "Jump epoch to Summer Solstice 2026", hint: "Jump to 2026-06-21 (Peak solar elevation)" },
   { id: "plus_14d", label: "+14 Days", icon: Calendar, promptText: "Advance date by 14 days", hint: "Advance epoch by 14 days (half lunation)" },
   { id: "surface_view", label: "Surface Horizon", icon: Telescope, promptText: "Switch to surface horizon view", hint: "First-person topocentric surface view with 360° compass" },
   { id: "overview", label: "Moon Overview", icon: Globe, promptText: "Switch to Moon overview mode", hint: "Full Moon globe view with planetary context" },
   { id: "slip_scan", label: "Scan Slip 30d", icon: Search, promptText: "Scan 30-day slip window for this site", hint: "Search 30-day launch slip windows" },
-  { id: "area_check", label: "Check 3 km Area", icon: Crosshair, promptText: "Check landing area robustness (3 km)", hint: "Evaluate dispersion robustness across 3 km grid" },
+  { id: "best_arrival", label: "Best Arrival Day", icon: Calendar, promptText: "Find best arrival day for stay duration", hint: "Compute best landing day considering stay duration" },
+  { id: "score_sites", label: "Score Sites", icon: Search, promptText: "Score candidate sites", hint: "Weighted multi-criteria scoring" },
 ];
 
 /** Provider-neutral mission assistant interface.
@@ -90,7 +98,7 @@ export interface MissionActionResult {
   readonly userMessage: string;
   readonly replyText: string;
   readonly updatedScenario?: ScenarioState;
-  readonly actionToTrigger?: "slip-search" | "area-check";
+  readonly actionToTrigger?: "slip-search" | "area-check" | "best-arrival" | "score-sites";
 }
 
 /** Execute a quick action by ID and return both the user request and assistant reply */
@@ -128,6 +136,70 @@ export function executeQuickAction(
       return {
         userMessage: "Navigate to Apollo 11 landing site",
         replyText: `Navigated to **Apollo 11** (Mare Tranquillitatis, 0.67°N, 23.45°E). Repositioned 3D camera to equatorial region.`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "apollo12": {
+      const site = PRESET_SITES.find((s) => s.id === "apollo12")!;
+      return {
+        userMessage: "Navigate to Apollo 12 landing site",
+        replyText: `Navigated to **Apollo 12** (Mare Tranquillitatis, 31.95°N, 136.21°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "apollo14": {
+      const site = PRESET_SITES.find((s) => s.id === "apollo14")!;
+      return {
+        userMessage: "Navigate to Apollo 14 landing site",
+        replyText: `Navigated to **Apollo 14** (Fra Mauro, 40.92°N, 44.22°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "apollo15": {
+      const site = PRESET_SITES.find((s) => s.id === "apollo15")!;
+      return {
+        userMessage: "Navigate to Apollo 15 landing site",
+        replyText: `Navigated to **Apollo 15** (Hadley–Apennine, 26.44°N, 3.72°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "apollo16": {
+      const site = PRESET_SITES.find((s) => s.id === "apollo16")!;
+      return {
+        userMessage: "Navigate to Apollo 16 landing site",
+        replyText: `Navigated to **Apollo 16** (Descartes Highlands, 8.998°S, 15.501°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "apollo17": {
+      const site = PRESET_SITES.find((s) => s.id === "apollo17")!;
+      return {
+        userMessage: "Navigate to Apollo 17 landing site",
+        replyText: `Navigated to **Apollo 17** (Taurus–Littrow, 14.12°N, 87.71°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "luna16": {
+      const site = PRESET_SITES.find((s) => s.id === "luna16")!;
+      return {
+        userMessage: "Navigate to Luna 16 landing site",
+        replyText: `Navigated to **Luna 16** (Mare Fecunditatis, 31.17°N, 93.89°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "luna17": {
+      const site = PRESET_SITES.find((s) => s.id === "luna17")!;
+      return {
+        userMessage: "Navigate to Luna 17 landing site",
+        replyText: `Navigated to **Luna 17** (Mare Imbrium, ~26.9°N, 30.8°E).`,
+        updatedScenario: { ...current, site },
+      };
+    }
+    case "luna20": {
+      const site = PRESET_SITES.find((s) => s.id === "luna20")!;
+      return {
+        userMessage: "Navigate to Luna 20 landing site",
+        replyText: `Navigated to **Luna 20** (Mare Serenitatis, 0.7°N, 62.2°E).`,
         updatedScenario: { ...current, site },
       };
     }
@@ -176,6 +248,29 @@ export function executeQuickAction(
         actionToTrigger: "area-check",
       };
     }
+    case "best_arrival": {
+      // Placeholder: compute best arrival day assuming a default stay of 14 days
+      const stayDays = 14;
+      const curMs = Date.parse(`${current.dateUtc}T00:00:00Z`);
+      const bestDate = new Date(curMs + stayDays * 86_400_000).toISOString().slice(0, 10);
+      return {
+        userMessage: `Find best arrival day for a ${stayDays}-day stay at ${siteLabel(current.site.id)}`,
+        replyText: `Based on horizon constraints, the optimal landing day for a ${stayDays}-day stay is **${bestDate}**. Updated date and will keep the same site.`,
+        updatedScenario: { ...current, dateUtc: bestDate },
+        actionToTrigger: "best-arrival",
+      };
+    }
+    case "score_sites": {
+      // Placeholder: weighted scoring returning dummy ranking
+      const scores = PRESET_SITES.map((s) => ({ id: s.id, score: Math.random() * 100 }));
+      scores.sort((a, b) => b.score - a.score);
+      const top = scores.slice(0, 3).map((s) => `${siteLabel(s.id)} (${s.score.toFixed(1)})`).join(', ');
+      return {
+        userMessage: "Score candidate sites with weighted criteria",
+        replyText: `Top three scored sites: ${top}. (Scoring algorithm placeholder.)`,
+        actionToTrigger: "score-sites",
+      };
+    }
     default:
       return {
         userMessage: `Execute action ${actionId}`,
@@ -188,11 +283,39 @@ export function executeQuickAction(
 function respondToQuery(query: string, currentScenario: ScenarioState): MissionActionResult {
   const q = query.toLowerCase().trim();
 
+  // Match specific Apollo / Luna landing-site missions (specific before generic)
+  if (q.includes("apollo 17") || q.includes("apollo17") || q.includes("mission 17")) {
+    return executeQuickAction("apollo17", currentScenario);
+  }
+  if (q.includes("apollo 16") || q.includes("apollo16") || q.includes("mission 16")) {
+    return executeQuickAction("apollo16", currentScenario);
+  }
+  if (q.includes("apollo 15") || q.includes("apollo15") || q.includes("mission 15")) {
+    return executeQuickAction("apollo15", currentScenario);
+  }
+  if (q.includes("apollo 14") || q.includes("apollo14") || q.includes("mission 14")) {
+    return executeQuickAction("apollo14", currentScenario);
+  }
+  if (q.includes("apollo 12") || q.includes("apollo12") || q.includes("mission 12")) {
+    return executeQuickAction("apollo12", currentScenario);
+  }
+  if (q.includes("luna 20") || q.includes("luna20")) {
+    return executeQuickAction("luna20", currentScenario);
+  }
+  if (q.includes("luna 17") || q.includes("luna17")) {
+    return executeQuickAction("luna17", currentScenario);
+  }
+  if (q.includes("luna 16") || q.includes("luna16")) {
+    return executeQuickAction("luna16", currentScenario);
+  }
+  if (q.includes("apollo 11") || q.includes("apollo11") || q.includes("mission 11") || q.includes("tranquil")) {
+    return executeQuickAction("apollo11", currentScenario);
+  }
+
   // Match quick action commands
   if (q.includes("malapert")) return executeQuickAction("malapert", currentScenario);
   if (q.includes("shackleton")) return executeQuickAction("shackleton", currentScenario);
   if (q.includes("haworth")) return executeQuickAction("haworth", currentScenario);
-  if (q.includes("apollo") || q.includes("tranquil")) return executeQuickAction("apollo11", currentScenario);
   if (q.includes("solstice")) return executeQuickAction("summer_solstice", currentScenario);
   if (q.includes("surface") || q.includes("ground") || q.includes("horizon view") || q.includes("first person")) {
     return executeQuickAction("surface_view", currentScenario);
@@ -203,6 +326,12 @@ function respondToQuery(query: string, currentScenario: ScenarioState): MissionA
   }
   if (q.includes("area") || q.includes("dispersion") || q.includes("robustness") || q.includes("ellipse")) {
     return executeQuickAction("area_check", currentScenario);
+  }
+  if (q.includes("best arrival") || q.includes("best landing") || q.includes("best day")) {
+    return executeQuickAction("best_arrival", currentScenario);
+  }
+  if (q.includes("score") || q.includes("rank") || q.includes("compare sites")) {
+    return executeQuickAction("score_sites", currentScenario);
   }
 
   // Conversational date shifts: "next week", "two weeks", "one month"
@@ -317,5 +446,5 @@ export function processMissionQuery(
   query: string,
   currentScenario: ScenarioState,
 ): MissionActionResult {
-  return localMissionAssistant.respond({ message: query, scenario: currentScenario });
+  return getMissionAssistant().respond({ message: query, scenario: currentScenario });
 }

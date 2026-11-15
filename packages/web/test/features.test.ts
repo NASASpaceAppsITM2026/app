@@ -50,6 +50,14 @@ describe("scenario state and serialization", () => {
     expect(siteLabel("malapert_mountain")).toBe("Malapert Mountain Peak");
     expect(siteLabel("apollo11")).toBe("Apollo 11 Landing Site");
   });
+
+  it("generates human-readable labels for additional Apollo and Luna landing sites", () => {
+    expect(siteLabel("apollo12")).toBe("Apollo 12 Landing Site");
+    expect(siteLabel("apollo14")).toBe("Apollo 14 Landing Site");
+    expect(siteLabel("apollo15")).toBe("Apollo 15 Landing Site");
+    expect(siteLabel("apollo17")).toBe("Apollo 17 Landing Site");
+    expect(siteLabel("luna16")).toBe("Luna 16 Landing Site");
+  });
 });
 
 describe("AI Mission Assistant & Quick Action execution", () => {
@@ -89,6 +97,28 @@ describe("AI Mission Assistant & Quick Action execution", () => {
     expect(res.updatedScenario).toBeDefined();
     expect(res.updatedScenario?.site.id).toBe("apollo11");
     expect(res.replyText).toContain("Apollo 11");
+  });
+
+  it("routes Apollo 15 to the Apollo 15 landing site preset", () => {
+    const res = processMissionQuery("switch to Apollo 15 please", defaultScenario());
+
+    expect(res.updatedScenario).toBeDefined();
+    expect(res.updatedScenario?.site.id).toBe("apollo15");
+    expect(res.replyText).toContain("Apollo 15");
+  });
+
+  it("routes Apollo 17 to the Apollo 17 landing site preset", () => {
+    const res = processMissionQuery("fly me to Apollo 17", defaultScenario());
+
+    expect(res.updatedScenario?.site.id).toBe("apollo17");
+    expect(res.replyText).toContain("Apollo 17");
+  });
+
+  it("routes Luna 16 to the Luna 16 landing site preset", () => {
+    const res = processMissionQuery("switch to Luna 16 please", defaultScenario());
+
+    expect(res.updatedScenario?.site.id).toBe("luna16");
+    expect(res.replyText).toContain("Luna 16");
   });
 
   it("provides scientific explanations for why verdicts fail", () => {
