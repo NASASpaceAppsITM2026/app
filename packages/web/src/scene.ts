@@ -297,15 +297,39 @@ export class LunarScene {
 
     // Landing Site Pin Marker
     this.siteMarker = new THREE.Group();
-    const pinGeometry = new THREE.SphereGeometry(0.025, 16, 8);
-    const pinMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6 });
+    const pinGeometry = new THREE.SphereGeometry(0.04, 16, 8);
+    const pinMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
     const pinMesh = new THREE.Mesh(pinGeometry, pinMaterial);
     this.siteMarker.add(pinMesh);
 
-    // Pulsing radar ring
-    const ringGeometry = new THREE.RingGeometry(0.035, 0.05, 32);
+    // Flag group: will be oriented to point outward from moon surface
+    const flagGroup = new THREE.Group();
+    
+    // Flag pole — points along +Y (upward from surface)
+    const poleGeom = new THREE.CylinderGeometry(0.003, 0.003, 0.12, 8);
+    const poleMat = new THREE.MeshBasicMaterial({ color: 0xf7f7f8 });
+    const pole = new THREE.Mesh(poleGeom, poleMat);
+    pole.position.y = 0.08;
+    flagGroup.add(pole);
+
+    // Flag triangle — extends along +X from pole top
+    const flagShape = new THREE.Shape();
+    flagShape.moveTo(0, 0);
+    flagShape.lineTo(0.06, 0.02);
+    flagShape.lineTo(0, 0.04);
+    flagShape.lineTo(0, 0);
+    const flagGeom = new THREE.ShapeGeometry(flagShape);
+    const flagMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+    const flag = new THREE.Mesh(flagGeom, flagMat);
+    flag.position.set(0, 0.12, 0);
+    flagGroup.add(flag);
+
+    this.siteMarker.add(flagGroup);
+
+    // Pulsing radar ring on ground
+    const ringGeometry = new THREE.RingGeometry(0.05, 0.07, 32);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x60a5fa,
+      color: 0xf59e0b,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.8,
@@ -632,7 +656,11 @@ export class LunarScene {
     const siteZ = r * Math.cos(latRad) * Math.sin(lonRad);
 
     this.siteMarker.position.set(siteX, siteY, siteZ);
-    this.siteMarker.lookAt(siteX * 2, siteY * 2, siteZ * 2);
+    // Orient the marker so its +Y axis points outward from the moon surface (surface normal)
+    const normal = new THREE.Vector3(siteX, siteY, siteZ).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion().setFromUnitVectors(up, normal);
+    this.siteMarker.quaternion.copy(quat);
 
     // Position Sun
     const sunAzRad = ((this.skyState.sunAzimuthDeg - 90) * Math.PI) / 180;

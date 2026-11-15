@@ -237,13 +237,59 @@ function drawPolarEllipse(
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, selected: boolean): void {
+  if (selected) {
+    // Pulsing outer ring for visibility
+    const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.3;
+    const ringRadius = 12 * pulse;
+    ctx.beginPath();
+    ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(245,158,11,${0.35 * (2 - pulse)})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Outer glow ring
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(245,158,11,0.15)";
+    ctx.fill();
+  }
+
+  // Main marker circle
+  const radius = selected ? 7 : 3;
   ctx.beginPath();
-  ctx.arc(x, y, selected ? 5 : 3, 0, Math.PI * 2);
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.fillStyle = selected ? "#f59e0b" : "#3b82f6";
   ctx.fill();
   ctx.strokeStyle = "#f7f7f8";
-  ctx.lineWidth = 1;
+  ctx.lineWidth = selected ? 2 : 1;
   ctx.stroke();
+
+  // Flag on top for selected marker
+  if (selected) {
+    const flagHeight = 16;
+    const flagWidth = 10;
+    const flagY = y - radius - flagHeight;
+
+    // Flag pole
+    ctx.beginPath();
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x, flagY);
+    ctx.strokeStyle = "#f7f7f8";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Flag triangle
+    ctx.beginPath();
+    ctx.moveTo(x, flagY);
+    ctx.lineTo(x + flagWidth, flagY + 3);
+    ctx.lineTo(x, flagY + 6);
+    ctx.closePath();
+    ctx.fillStyle = "#f59e0b";
+    ctx.fill();
+    ctx.strokeStyle = "#f7f7f8";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
 }
 
 function fitCanvas(canvas: HTMLCanvasElement): void {
