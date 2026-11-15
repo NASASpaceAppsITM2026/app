@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { projectSite, unprojectSite } from "../src/lunar-projection";
-import { polarRadius, fitPolarViewport, initialPolarViewport, constrainPolarView } from "../src/polar-view";
+import { polarRadius, fitPolarViewport, initialPolarViewport, constrainPolarView, isWithinPolarMap } from "../src/polar-view";
 import { moonTiles } from "../src/moon-tiles";
+import { wacTiles, WAC_TILE_URL } from "../src/wac-tiles";
+import { lonLatToPercent, viewportForSite } from "../src/global-view";
 
 describe("ported lunar map projection", () => {
   it("projects the south pole to the map origin", () => {
@@ -53,5 +55,28 @@ describe("ported NASA WMTS moon tiles", () => {
       expect(tile.width).toBeGreaterThan(0);
       expect(tile.height).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("polar vs global site coverage", () => {
+  it("places south-polar candidates on the polar map and Apollo sites on the global map", () => {
+    expect(isWithinPolarMap(-89.9, 120)).toBe(true);
+    expect(isWithinPolarMap(-86, 2.7)).toBe(true);
+    expect(isWithinPolarMap(0.674, 23.45)).toBe(false);
+    expect(isWithinPolarMap(26.44, 3.72)).toBe(false);
+  });
+});
+
+describe("global WAC mosaic tiles", () => {
+  it("selects Trek WAC tiles around Apollo 11", () => {
+    const box = viewportForSite(23.45, 0.674, 1, 10);
+    const tiles = wacTiles(box, 400);
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles[0].url.startsWith(WAC_TILE_URL)).toBe(true);
+    const pct = lonLatToPercent(23.45, 0.674, box);
+    expect(pct.x).toBeGreaterThan(40);
+    expect(pct.x).toBeLessThan(60);
+    expect(pct.y).toBeGreaterThan(40);
+    expect(pct.y).toBeLessThan(60);
   });
 });

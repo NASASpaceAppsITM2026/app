@@ -11,6 +11,12 @@ import { projectSite, type ViewportBox } from "./lunar-projection";
 /** Radius of the south-polar map disc (projected metres from the pole). */
 export const polarRadius = projectSite(-85, 0).y;
 
+/** True when a site can be drawn on the polar LOLA basemap (~85°S–90°S). */
+export function isWithinPolarMap(latDeg: number, eastLonDeg: number): boolean {
+  const point = projectSite(latDeg, eastLonDeg);
+  return Math.hypot(point.x, point.y) <= polarRadius;
+}
+
 /** Full supported polar map extent. */
 export const polarExtent: ViewportBox = { xmin: -polarRadius, ymin: -polarRadius, xmax: polarRadius, ymax: polarRadius };
 

@@ -1110,7 +1110,7 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
 
   const backdrop = el("div", { id: "site-info-backdrop", class: "modal-backdrop" });
   const modal = el("div", {
-    class: "w-[680px] max-w-[95vw] glass-pill rounded-2xl p-5 space-y-4 shadow-2xl text-xs",
+    class: "w-[860px] max-w-[95vw] glass-pill rounded-2xl p-5 space-y-4 shadow-2xl text-xs",
     role: "dialog",
     "aria-label": "Landing site information",
   });
@@ -1125,9 +1125,9 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
   const body = el("div", { class: "max-h-[70vh] overflow-y-auto pr-1" });
 
   // Two-column layout: contextual data on the left, detailed map on the right.
-  const contentGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-2 gap-4" });
+  const contentGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)] gap-4 items-stretch" });
   const leftCol = el("div", { class: "space-y-4" });
-  const rightCol = el("div", { class: "space-y-4" });
+  const rightCol = el("div", { class: "flex flex-col gap-3 min-h-0" });
   body.appendChild(contentGrid);
   contentGrid.appendChild(leftCol);
   contentGrid.appendChild(rightCol);
@@ -1168,16 +1168,9 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
     infoRow("Earth Elevation Range", `${area.earthElevMin.toFixed(1)}° – ${area.earthElevMax.toFixed(1)}°`),
   ));
 
-  // 4. Detailed lunar map with landing ellipse and nearby landing sites (right column).
-  rightCol.appendChild(infoSection("Detailed Lunar Map",
-    el("div", { class: "text-[10px] text-[var(--color-text-muted)]" }, "Terrain map with landing ellipse and nearby landing sites."),
-  ));
-  const mapHost = el("div", { id: "site-map-host", class: "relative w-full h-[300px] rounded-lg border border-[var(--color-border)] bg-black/40 overflow-hidden" });
-  rightCol.appendChild(mapHost);
-
-  // 5. Nearby landing sites around the selected point.
+  // 4. Nearby landing sites (left, so the map can stay large and uncluttered).
   const nearby = nearbyLandingSites(site);
-  const nearbyList = el("div", { class: "space-y-1" });
+  const nearbyList = el("div", { class: "space-y-1 max-h-[140px] overflow-y-auto" });
   for (const n of nearby) {
     const row = el("button", {
       class: "w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-[var(--color-bg-input)] hover:bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-left transition-colors",
@@ -1191,7 +1184,12 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
     });
     nearbyList.appendChild(row);
   }
-  rightCol.appendChild(infoSection("Nearby Landing Sites", nearbyList));
+  leftCol.appendChild(infoSection("Nearby Landing Sites", nearbyList));
+
+  // 5. Compact lunar map with landing ellipse (right column).
+  rightCol.appendChild(el("div", { class: "text-[10px] font-bold text-[var(--color-accent)] uppercase tracking-wider" }, "Lunar Map"));
+  const mapHost = el("div", { id: "site-map-host", class: "relative w-full flex-1 min-h-[380px] h-[min(52vh,460px)] rounded-lg border border-[var(--color-border)] bg-black/40 overflow-hidden" });
+  rightCol.appendChild(mapHost);
 
   modal.appendChild(body);
 
@@ -1213,11 +1211,12 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
   siteMap = createLunarMap({
     container: mapHost,
     selected: site,
-    nearbySites: nearbyLandingSites(site),
+    nearbySites: nearby,
     ellipseRadiusKm: LANDING_ELLIPSE_KM,
-    onSelect: (nearby) => {
+    compact: true,
+    onSelect: (nearbySite) => {
       closeSiteInfoModal();
-      switchSite(nearby);
+      switchSite(nearbySite);
     },
   });
   siteMap.fitToSite(site);
