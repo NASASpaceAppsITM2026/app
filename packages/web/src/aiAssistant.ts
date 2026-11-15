@@ -64,13 +64,13 @@ export interface MissionAssistantInput {
 
 export interface MissionAssistant {
   readonly id: string;
-  respond(input: MissionAssistantInput): MissionActionResult;
+  respond(input: MissionAssistantInput): Promise<MissionActionResult>;
 }
 
 /** Offline default assistant: deterministic local rule engine. */
 export const localMissionAssistant: MissionAssistant = {
   id: "lunar-local-rule-engine",
-  respond: (input) => respondToQuery(input.message, input.scenario),
+  respond: async (input) => respondToQuery(input.message, input.scenario),
 };
 
 let missionAssistant: MissionAssistant = localMissionAssistant;
@@ -442,9 +442,9 @@ function respondToQuery(query: string, currentScenario: ScenarioState): MissionA
  * Parse conversational natural language query in multi-turn context and
  * route it through the configured mission assistant backend.
  */
-export function processMissionQuery(
+export async function processMissionQuery(
   query: string,
   currentScenario: ScenarioState,
-): MissionActionResult {
+): Promise<MissionActionResult> {
   return getMissionAssistant().respond({ message: query, scenario: currentScenario });
 }

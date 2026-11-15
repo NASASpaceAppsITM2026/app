@@ -49,8 +49,10 @@ import {
   QUICK_ACTIONS,
   executeQuickAction,
   processMissionQuery,
+  setMissionAssistant,
   type ChatTurn,
 } from "./aiAssistant";
+import { createGroqMissionAssistant } from "./ai/groqAssistant";
 import {
   skyAtForDate,
   horizonMaskForSite,
@@ -385,7 +387,11 @@ function buildFloatingIsle(): HTMLElement {
     const query = input.value.trim();
     if (query) {
       input.value = "";
-      handleUserQuerySubmit(query);
+      void handleUserQuerySubmit(query).catch((err) => {
+        console.error("Mission query failed:", err);
+        setThinking(false);
+        showToast("Mission request failed. Check console for details.");
+      });
     }
   });
 
@@ -429,22 +435,27 @@ async function handleUserQuerySubmit(query: string) {
   setThinking(true);
   renderIsleThread();
 
-  const res = processMissionQuery(trimmed, state);
+  try {
+    const res = await processMissionQuery(trimmed, state);
 
-  // Brief local latency so the thinking state is perceptible (offline rule engine).
-  await new Promise((resolve) => setTimeout(resolve, 450));
+    // Brief local latency so the thinking state is perceptible (offline rule engine).
+    await new Promise((resolve) => setTimeout(resolve, 450));
 
-  pushChatTurn(makeChatTurn("assistant", res.replyText, true));
-  setThinking(false);
+    pushChatTurn(makeChatTurn("assistant", res.replyText, true));
+    setThinking(false);
 
-  if (res.updatedScenario) {
-    state = res.updatedScenario;
-    syncUrl();
-    void render();
-    showToast(`Scenario updated`);
+    if (res.updatedScenario) {
+      state = res.updatedScenario;
+      syncUrl();
+      void render();
+      showToast(`Scenario updated`);
+    }
+
+    renderIsleThread(res.actionToTrigger);
+  } catch (err) {
+    setThinking(false);
+    throw err;
   }
-
-  renderIsleThread(res.actionToTrigger);
 }
 
 function renderIsleThread(actionTrigger?: "slip-search" | "area-check" | "best-arrival" | "score-sites") {
@@ -1260,6 +1271,18 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* ── Init ── */
+
+// Wire up the Groq mission assistant when an API key is available; the app
+// falls back to the deterministic local rule engine otherwise.
+const groqApiKey = import.meta.env.VITE_GROQ_API_KEY?.trim();
+const groqModel = import.meta.env.VITE_GROQ_MODEL?.trim();
+console.log("[AI] VITE_GROQ_API_KEY present:", Boolean(groqApiKey));
+if (groqApiKey) {
+  setMissionAssistant(createGroqMissionAssistant({ apiKey: groqApiKey, model: groqModel }));
+  console.log("[AI] Groq mission assistant initialized");
+} else {
+  console.log("[AI] Using local rule engine (no Groq API key)");
+}
 
 state = readScenarioFromUrl();
 render().catch((e) => console.error("Render failed:", e));

@@ -120,40 +120,40 @@ describe("AI Mission Assistant & Quick Action execution", () => {
     expect(res.updatedScenario?.viewMode).toBe("site-level");
   });
 
-  it("processes free-form natural language and updates scenario directly", () => {
+  it("processes free-form natural language and updates scenario directly", async () => {
     const scenario = defaultScenario();
-    const res = processMissionQuery("switch to Apollo 11 please", scenario);
+    const res = await processMissionQuery("switch to Apollo 11 please", scenario);
 
     expect(res.updatedScenario).toBeDefined();
     expect(res.updatedScenario?.site.id).toBe("apollo11");
     expect(res.replyText).toContain("Apollo 11");
   });
 
-  it("routes Apollo 15 to the Apollo 15 landing site preset", () => {
-    const res = processMissionQuery("switch to Apollo 15 please", defaultScenario());
+  it("routes Apollo 15 to the Apollo 15 landing site preset", async () => {
+    const res = await processMissionQuery("switch to Apollo 15 please", defaultScenario());
 
     expect(res.updatedScenario).toBeDefined();
     expect(res.updatedScenario?.site.id).toBe("apollo15");
     expect(res.replyText).toContain("Apollo 15");
   });
 
-  it("routes Apollo 17 to the Apollo 17 landing site preset", () => {
-    const res = processMissionQuery("fly me to Apollo 17", defaultScenario());
+  it("routes Apollo 17 to the Apollo 17 landing site preset", async () => {
+    const res = await processMissionQuery("fly me to Apollo 17", defaultScenario());
 
     expect(res.updatedScenario?.site.id).toBe("apollo17");
     expect(res.replyText).toContain("Apollo 17");
   });
 
-  it("routes Luna 16 to the Luna 16 landing site preset", () => {
-    const res = processMissionQuery("switch to Luna 16 please", defaultScenario());
+  it("routes Luna 16 to the Luna 16 landing site preset", async () => {
+    const res = await processMissionQuery("switch to Luna 16 please", defaultScenario());
 
     expect(res.updatedScenario?.site.id).toBe("luna16");
     expect(res.replyText).toContain("Luna 16");
   });
 
-  it("provides scientific explanations for why verdicts fail", () => {
+  it("provides scientific explanations for why verdicts fail", async () => {
     const scenario = defaultScenario();
-    const res = processMissionQuery("Why did my constraint fail?", scenario);
+    const res = await processMissionQuery("Why did my constraint fail?", scenario);
 
     expect(res.updatedScenario).toBeUndefined();
     expect(res.replyText).toContain("Mission Telemetry Analysis");
