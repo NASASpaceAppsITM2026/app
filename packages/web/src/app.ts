@@ -21,16 +21,19 @@ import {
   Activity,
   ChevronDown,
   Earth,
+  History,
   Info,
   Link2,
   Loader,
   Moon,
   Pause,
   Play,
+  Plus,
   Rocket,
   Send,
   Share,
   Sun,
+  Trash2,
   Undo2,
   X,
 } from "lucide";
@@ -119,6 +122,158 @@ let previousChatTurns: ChatTurn[] | null = null;
 let isThinking = false;
 let chatTurnSeq = 0;
 
+// Chat history persistence
+const CHAT_HISTORY_KEY = "lunar-nav-chat-history";
+const CHAT_CURRENT_SESSION_KEY = "lunar-nav-current-session";
+
+export interface ChatSession {
+  readonly id: string;
+  readonly title: string;
+  readonly turns: ChatTurn[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+let currentSessionId: string | null = null;
+let isHistoryOpen = false;
+
+function generateSessionId(): string {
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function loadChatHistory(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (raw) {
+      return JSON.parse(raw) as ChatSession[];
+    }
+  } catch (e) {
+    console.warn("Failed to load chat history:", e);
+  }
+  return [];
+}
+
+function saveChatHistory(sessions: ChatSession[]) {
+  try {
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(sessions));
+  } catch (e) {
+    console.warn("Failed to save chat history:", e);
+  }
+}
+
+function saveCurrentSessionId(id: string | null) {
+  try {
+    if (id) {
+      localStorage.setItem(CHAT_CURRENT_SESSION_KEY, id);
+    } else {
+      localStorage.removeItem(CHAT_CURRENT_SESSION_KEY);
+    }
+  } catch (e) {
+    console.warn("Failed to save current session:", e);
+  }
+}
+
+function loadCurrentSessionId(): string | null {
+  try {
+    return localStorage.getItem(CHAT_CURRENT_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentSession(): ChatSession | null {
+  if (!currentSessionId) return null;
+  const sessions = loadChatHistory();
+  return sessions.find((s) => s.id === currentSessionId) ?? null;
+}
+
+function saveCurrentTurns() {
+  if (chatTurns.length === 0) return;
+  const sessions = loadChatHistory();
+  const now = new Date().toISOString();
+  const sessionTitle = chatTurns[0]?.text?.slice(0, 50) + (chatTurns[0]?.text?.length ?? 0 > 50 ? "..." : "");
+  
+  const existingIndex = sessions.findIndex((s) => s.id === currentSessionId);
+  const session: ChatSession = {
+    id: currentSessionId ?? generateSessionId(),
+    title: sessionTitle,
+    turns: [...chatTurns],
+    createdAt: existingIndex >= 0 ? sessions[existingIndex].createdAt : now,
+    updatedAt: now,
+  };
+  
+  if (existingIndex >= 0) {
+    sessions[existingIndex] = session;
+  } else {
+    sessions.unshift(session);
+  }
+  
+  // Keep only last 50 sessions
+  if (sessions.length > 50) {
+    sessions.length = 50;
+  }
+  
+  saveChatHistory(sessions);
+  if (!currentSessionId) {
+    currentSessionId = session.id;
+    saveCurrentSessionId(currentSessionId);
+  }
+}
+
+function startNewChat() {
+  chatTurns = [];
+  previousChatTurns = null;
+  currentSessionId = null;
+  saveCurrentSessionId(null);
+  isHistoryOpen = false;
+  const box = document.getElementById("isle-response-box");
+  if (box) box.classList.add("hidden");
+  const historyPanel = document.getElementById("chat-history-panel");
+  if (historyPanel) historyPanel.classList.add("hidden");
+}
+
+function loadSession(sessionId: string) {
+  const sessions = loadChatHistory();
+  const session = sessions.find((s) => s.id === sessionId);
+  if (session) {
+    currentSessionId = session.id;
+    chatTurns = [...session.turns];
+    previousChatTurns = null;
+    saveCurrentSessionId(session.id);
+    isHistoryOpen = false;
+    const historyPanel = document.getElementById("chat-history-panel");
+    if (historyPanel) historyPanel.classList.add("hidden");
+    renderIsleThread();
+  }
+}
+
+function deleteSession(sessionId: string, event: Event) {
+  event.stopPropagation();
+  const sessions = loadChatHistory();
+  const filtered = sessions.filter((s) => s.id !== sessionId);
+  saveChatHistory(filtered);
+  if (currentSessionId === sessionId) {
+    startNewChat();
+  }
+  renderHistoryPanel();
+}
+
+function restoreChatFromStorage() {
+  const sessionId = loadCurrentSessionId();
+  if (sessionId) {
+    const sessions = loadChatHistory();
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session && session.turns.length > 0) {
+      currentSessionId = sessionId;
+      chatTurns = [...session.turns];
+      return;
+    }
+  }
+  // No previous session — start fresh
+  currentSessionId = null;
+  chatTurns = [];
+}
+
 function nextChatId(prefix: string): string {
   return `${prefix}-${Date.now()}-${chatTurnSeq++}`;
 }
@@ -133,6 +288,7 @@ function setThinking(value: boolean): void {
 
 function pushChatTurn(turn: ChatTurn): void {
   chatTurns = [...chatTurns, turn];
+  saveCurrentTurns();
 }
 
 // UI Panels
@@ -157,9 +313,15 @@ async function render() {
   const isFirstRender = !root.querySelector("#top-navbar");
 
   if (isFirstRender) {
+    // Restore chat from localStorage before building UI
+    restoreChatFromStorage();
     clear(root);
     buildMinimalistApp(root);
     await initSceneAndData();
+    // If we restored turns, show them
+    if (chatTurns.length > 0) {
+      renderIsleThread();
+    }
   } else {
     updateTopNavbar();
     const sky = await skyAtForDate(state.site, state.dateUtc, state.hourUtc ?? 12);
@@ -340,6 +502,31 @@ function buildFloatingIsle(): HTMLElement {
     class: "floating-isle flex flex-col p-2.5 gap-2",
   });
 
+  // Row 0: Toolbar with History & New Chat buttons
+  const toolbar = el("div", {
+    id: "isle-toolbar",
+    class: "flex items-center justify-end gap-1.5 pb-1 border-b border-[var(--color-border)]",
+  });
+  const historyBtn = el("button", {
+    id: "isle-history-btn",
+    class: "flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] text-[var(--color-text-muted)] hover:text-white hover:bg-[var(--color-bg-elevated)] transition-all",
+    title: "Chat history",
+  }, createElement(History, { class: "h-3 w-3" }), "History");
+  historyBtn.addEventListener("click", () => toggleHistoryPanel());
+  toolbar.appendChild(historyBtn);
+
+  const newChatBtn = el("button", {
+    id: "isle-new-chat-btn",
+    class: "flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] text-[var(--color-text-muted)] hover:text-white hover:bg-[var(--color-bg-elevated)] transition-all",
+    title: "Start new chat",
+  }, createElement(Plus, { class: "h-3 w-3" }), "New");
+  newChatBtn.addEventListener("click", () => {
+    startNewChat();
+    showToast("New chat started");
+  });
+  toolbar.appendChild(newChatBtn);
+  isle.appendChild(toolbar);
+
   // Row 1: Quick Action Messages / Pills
   const actionsRow = el("div", {
     id: "isle-quick-actions",
@@ -400,6 +587,82 @@ function buildFloatingIsle(): HTMLElement {
   isle.appendChild(inputForm);
 
   return isle;
+}
+
+/* ── Chat History Sidebar Panel ── */
+
+function toggleHistoryPanel() {
+  isHistoryOpen = !isHistoryOpen;
+  if (isHistoryOpen) {
+    renderHistoryPanel();
+    const panel = document.getElementById("chat-history-panel");
+    if (panel) panel.classList.remove("hidden");
+  } else {
+    const panel = document.getElementById("chat-history-panel");
+    if (panel) panel.classList.add("hidden");
+  }
+}
+
+function renderHistoryPanel() {
+  let panel = document.getElementById("chat-history-panel");
+  if (!panel) {
+    panel = el("div", {
+      id: "chat-history-panel",
+      class: "chat-history-panel hidden",
+    });
+    document.getElementById("app")?.appendChild(panel);
+  }
+  clear(panel);
+
+  const sessions = loadChatHistory();
+
+  const header = el("div", { class: "flex items-center justify-between mb-2" },
+    el("span", { class: "text-[10px] font-bold text-[var(--color-accent)] uppercase tracking-wider" }, "Chat History"),
+    el("button", {
+      class: "text-xs text-[var(--color-text-muted)] hover:text-white p-0.5",
+      "aria-label": "Close history",
+    }, createElement(X, { class: "h-3 w-3" })),
+  );
+  header.querySelector("button")?.addEventListener("click", () => {
+    isHistoryOpen = false;
+    panel.classList.add("hidden");
+  });
+  panel.appendChild(header);
+
+  if (sessions.length === 0) {
+    panel.appendChild(el("div", { class: "text-[11px] text-[var(--color-text-muted)] text-center py-4" }, "No saved chats yet"));
+    return;
+  }
+
+  const list = el("div", { class: "flex flex-col gap-1 max-h-64 overflow-y-auto pr-0.5" });
+  for (const session of sessions) {
+    const item = el("div", {
+      class: `flex items-center justify-between group px-2 py-1.5 rounded-lg cursor-pointer transition-all ${
+        session.id === currentSessionId
+          ? "bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/30"
+          : "hover:bg-[var(--color-bg-elevated)] border border-transparent"
+      }`,
+    });
+
+    const info = el("div", { class: "flex-1 min-w-0" },
+      el("div", { class: "text-[11px] text-[var(--color-text-primary)] truncate" }, session.title),
+      el("div", { class: "text-[9px] text-[var(--color-text-muted)]" },
+        new Date(session.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      ),
+    );
+    item.appendChild(info);
+
+    const deleteBtn = el("button", {
+      class: "p-0.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] opacity-0 group-hover:opacity-100 transition-all",
+      title: "Delete chat",
+    }, createElement(Trash2, { class: "h-3 w-3" }));
+    deleteBtn.addEventListener("click", (e) => deleteSession(session.id, e));
+    item.appendChild(deleteBtn);
+
+    item.addEventListener("click", () => loadSession(session.id));
+    list.appendChild(item);
+  }
+  panel.appendChild(list);
 }
 
 /** Immediate action execution when an already-made message or pill is clicked */
