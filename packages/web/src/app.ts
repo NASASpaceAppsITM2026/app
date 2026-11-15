@@ -125,6 +125,7 @@ let chatTurnSeq = 0;
 // Chat history persistence
 const CHAT_HISTORY_KEY = "lunar-nav-chat-history";
 const CHAT_CURRENT_SESSION_KEY = "lunar-nav-current-session";
+const CHAT_THREAD_OPEN_KEY = "lunar-nav-chat-thread-open";
 
 export interface ChatSession {
   readonly id: string;
@@ -136,6 +137,7 @@ export interface ChatSession {
 
 let currentSessionId: string | null = null;
 let isHistoryOpen = false;
+let isChatThreadOpen = false;
 
 function generateSessionId(): string {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -178,6 +180,23 @@ function loadCurrentSessionId(): string | null {
     return localStorage.getItem(CHAT_CURRENT_SESSION_KEY);
   } catch {
     return null;
+  }
+}
+
+function loadChatThreadOpen(): boolean {
+  try {
+    return localStorage.getItem(CHAT_THREAD_OPEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setChatThreadOpen(open: boolean) {
+  isChatThreadOpen = open;
+  try {
+    localStorage.setItem(CHAT_THREAD_OPEN_KEY, String(open));
+  } catch (e) {
+    console.warn("Failed to save chat visibility:", e);
   }
 }
 
@@ -225,6 +244,7 @@ function startNewChat() {
   previousChatTurns = null;
   currentSessionId = null;
   saveCurrentSessionId(null);
+  setChatThreadOpen(false);
   isHistoryOpen = false;
   const box = document.getElementById("isle-response-box");
   if (box) box.classList.add("hidden");
@@ -259,6 +279,7 @@ function deleteSession(sessionId: string, event: Event) {
 }
 
 function restoreChatFromStorage() {
+  isChatThreadOpen = loadChatThreadOpen();
   const sessionId = loadCurrentSessionId();
   if (sessionId) {
     const sessions = loadChatHistory();
@@ -272,6 +293,7 @@ function restoreChatFromStorage() {
   // No previous session — start fresh
   currentSessionId = null;
   chatTurns = [];
+  isChatThreadOpen = false;
 }
 
 function nextChatId(prefix: string): string {
@@ -319,7 +341,7 @@ async function render() {
     buildMinimalistApp(root);
     await initSceneAndData();
     // If we restored turns, show them
-    if (chatTurns.length > 0) {
+    if (chatTurns.length > 0 && isChatThreadOpen) {
       renderIsleThread();
     }
   } else {
@@ -724,23 +746,27 @@ async function handleUserQuerySubmit(query: string) {
 function renderIsleThread(actionTrigger?: "slip-search" | "area-check" | "best-arrival" | "score-sites") {
   const box = document.getElementById("isle-response-box");
   if (!box) return;
+  setChatThreadOpen(true);
   clear(box);
   box.classList.remove("hidden");
 
+  const undoButton = previousState ? el("button", {
+    class: "text-[10px] text-[var(--color-text-muted)] hover:text-white underline",
+  }, createElement(Undo2, { class: "h-3 w-3" }), " Undo") : null;
+  const dismissButton = el("button", {
+    class: "text-xs text-[var(--color-text-muted)] hover:text-white p-0.5",
+    "aria-label": "Dismiss message",
+  }, createElement(X, { class: "h-3 w-3" }));
+  const headerActions = el("div", { class: "flex items-center gap-2" });
+  if (undoButton) headerActions.appendChild(undoButton);
+  headerActions.appendChild(dismissButton);
+
   const header = el("div", { class: "flex items-center justify-between" },
     el("span", { class: "text-[10px] font-bold text-[var(--color-accent)] uppercase tracking-wider" }, "Mission Update"),
-    el("div", { class: "flex items-center gap-2" },
-      previousState ? el("button", {
-        class: "text-[10px] text-[var(--color-text-muted)] hover:text-white underline",
-      }, createElement(Undo2, { class: "h-3 w-3" }), " Undo") : el("span", {}),
-      el("button", {
-        class: "text-xs text-[var(--color-text-muted)] hover:text-white p-0.5",
-        "aria-label": "Dismiss message",
-      }, createElement(X, { class: "h-3 w-3" })),
-    ),
+    headerActions,
   );
 
-  header.querySelectorAll("button")[0]?.addEventListener("click", () => {
+  undoButton?.addEventListener("click", () => {
     if (previousState) {
       state = { ...previousState };
       chatTurns = previousChatTurns ? [...previousChatTurns] : chatTurns;
@@ -753,7 +779,8 @@ function renderIsleThread(actionTrigger?: "slip-search" | "area-check" | "best-a
     renderIsleThread();
   });
 
-  header.querySelectorAll("button")[1]?.addEventListener("click", () => {
+  dismissButton.addEventListener("click", () => {
+    setChatThreadOpen(false);
     box.classList.add("hidden");
   });
 

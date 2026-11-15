@@ -25,6 +25,8 @@ const SUN_DISTANCE_KM = 149_600_000;
 // Overview scale: 1 unit = 1000 km
 const OVERVIEW_SCALE = 0.001;
 const MOON_SCENE_RADIUS = MOON_RADIUS_KM * OVERVIEW_SCALE; // ~1.7374 units
+const MIN_OVERVIEW_CAMERA_RADIUS = 3.5; // Avoid magnifying the 2K base map beyond its useful detail.
+const SITE_FOCUS_CAMERA_RADIUS = 4.5;
 
 const MOON_TEXTURE_URL = "/textures/moon.jpg";
 const EARTH_TEXTURE_URL = "/textures/earth.png";
@@ -36,8 +38,10 @@ function loadMoonTexture(): Promise<THREE.Texture> {
     loader.load(
       MOON_TEXTURE_URL,
       (texture) => {
-        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 16;
         resolve(texture);
       },
       undefined,
@@ -48,35 +52,139 @@ function loadMoonTexture(): Promise<THREE.Texture> {
   });
 }
 
-function createProceduralMoonTexture(size = 512): THREE.CanvasTexture {
+function createProceduralMoonTexture(size = 1024): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size / 2;
   const ctx = canvas.getContext("2d")!;
+
+  // Base regolith color
   ctx.fillStyle = "#8a8a8a";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Seeded random for reproducibility
+  let seed = 42;
+  function seededRandom() {
+    seed = (seed * 16807 + 0) % 2147483647;
+    return (seed - 1) / 2147483646;
+  }
+
+  // Draw maria (dark basalt plains) — larger dark patches
+  const maria = [
+    { x: 0.15, y: 0.35, rx: 0.12, ry: 0.08 }, // Mare Imbrium
+    { x: 0.25, y: 0.45, rx: 0.08, ry: 0.1 },  // Mare Serenitatis
+    { x: 0.35, y: 0.38, rx: 0.1, ry: 0.07 },  // Mare Nectaris
+    { x: 0.55, y: 0.42, rx: 0.15, ry: 0.12 }, // Mare Tranquillitatis
+    { x: 0.65, y: 0.35, rx: 0.09, ry: 0.09 }, // Mare Crisium
+    { x: 0.45, y: 0.5, rx: 0.07, ry: 0.06 },  // Mare Fecunditatis
+    { x: 0.75, y: 0.45, rx: 0.11, ry: 0.08 }, // Mare Humorum
+    { x: 0.1, y: 0.4, rx: 0.06, ry: 0.05 },   // Mare Frigoris (partial)
+  ];
+  for (const m of maria) {
+    const grad = ctx.createRadialGradient(
+      m.x * canvas.width, m.y * canvas.height, 0,
+      m.x * canvas.width, m.y * canvas.height, Math.max(m.rx, m.ry) * canvas.width,
+    );
+    grad.addColorStop(0, "rgba(60, 58, 55, 0.7)");
+    grad.addColorStop(0.6, "rgba(70, 68, 65, 0.4)");
+    grad.addColorStop(1, "rgba(80, 78, 75, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(m.x * canvas.width, m.y * canvas.height, m.rx * canvas.width, m.ry * canvas.height, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw craters of various sizes (scaled for 1024×512 resolution)
+  const craters: { x: number; y: number; r: number }[] = [];
+  // Large craters
+  for (let i = 0; i < 20; i++) {
+    craters.push({
+      x: seededRandom() * canvas.width,
+      y: seededRandom() * canvas.height,
+      r: 15 + seededRandom() * 35,
+    });
+  }
+  // Medium craters
+  for (let i = 0; i < 60; i++) {
+    craters.push({
+      x: seededRandom() * canvas.width,
+      y: seededRandom() * canvas.height,
+      r: 5 + seededRandom() * 15,
+    });
+  }
+  // Small craters
+  for (let i = 0; i < 120; i++) {
+    craters.push({
+      x: seededRandom() * canvas.width,
+      y: seededRandom() * canvas.height,
+      r: 1.5 + seededRandom() * 5,
+    });
+  }
+
+  for (const c of craters) {
+    // Crater floor (darker)
+    const floorGrad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r * 0.7);
+    floorGrad.addColorStop(0, "rgba(90, 88, 85, 0.5)");
+    floorGrad.addColorStop(1, "rgba(100, 98, 95, 0)");
+    ctx.fillStyle = floorGrad;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Crater rim (lighter highlight on one side, shadow on other)
+    ctx.strokeStyle = "rgba(170, 168, 165, 0.4)";
+    ctx.lineWidth = Math.max(1, c.r * 0.15);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Rim shadow (bottom-right)
+    ctx.strokeStyle = "rgba(50, 48, 45, 0.3)";
+    ctx.lineWidth = Math.max(1, c.r * 0.1);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r * 1.02, 0.2 * Math.PI, 1.2 * Math.PI);
+    ctx.stroke();
+
+    // Rim highlight (top-left)
+    ctx.strokeStyle = "rgba(190, 188, 185, 0.3)";
+    ctx.lineWidth = Math.max(1, c.r * 0.08);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r * 1.02, 1.3 * Math.PI, 2.3 * Math.PI);
+    ctx.stroke();
+
+    // Central peak for larger craters
+    if (c.r > 20) {
+      ctx.fillStyle = "rgba(160, 158, 155, 0.5)";
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Fine noise texture for regolith detail
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imageData.data;
-  function noise(x: number, y: number): number {
+  function noise2D(x: number, y: number): number {
     const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
     return n - Math.floor(n);
   }
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
-      const n = noise(x * 0.05, y * 0.05) * 30 - 15;
-      const fine = noise(x * 0.2, y * 0.2) * 10 - 5;
-      const val = 138 + n + fine;
-      data[i] = val;
-      data[i + 1] = val;
-      data[i + 2] = val;
-      data[i + 3] = 255;
+      const n = noise2D(x * 0.05, y * 0.05) * 20 - 10;
+      const fine = noise2D(x * 0.3, y * 0.3) * 8 - 4;
+      const val = n + fine;
+      data[i] = Math.max(0, Math.min(255, data[i] + val));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + val));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + val));
     }
   }
   ctx.putImageData(imageData, 0, 0);
+
   const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.anisotropy = 16;
   return texture;
 }
 
@@ -99,33 +207,140 @@ function loadEarthTexture(): Promise<THREE.Texture> {
   });
 }
 
-function createProceduralEarthTexture(size = 256): THREE.CanvasTexture {
+function createProceduralEarthTexture(size = 512): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size / 2;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#1a4d8a";
+
+  // Seeded random
+  let seed = 123;
+  function seededRandom() {
+    seed = (seed * 16807 + 0) % 2147483647;
+    return (seed - 1) / 2147483646;
+  }
+
+  // Deep ocean base
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  oceanGrad.addColorStop(0, "#1a3a5c");
+  oceanGrad.addColorStop(0.3, "#1a5090");
+  oceanGrad.addColorStop(0.5, "#1a5a9a");
+  oceanGrad.addColorStop(0.7, "#1a5090");
+  oceanGrad.addColorStop(1, "#1a3a5c");
+  ctx.fillStyle = oceanGrad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#2d5a27";
-  const continents = [
-    { x: 0.25, y: 0.3, w: 0.15, h: 0.25 },
-    { x: 0.5, y: 0.25, w: 0.12, h: 0.2 },
-    { x: 0.7, y: 0.3, w: 0.15, h: 0.2 },
+
+  // Ice caps at poles
+  const northIce = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.12);
+  northIce.addColorStop(0, "rgba(240, 245, 255, 0.95)");
+  northIce.addColorStop(0.5, "rgba(220, 230, 245, 0.6)");
+  northIce.addColorStop(1, "rgba(200, 220, 240, 0)");
+  ctx.fillStyle = northIce;
+  ctx.fillRect(0, 0, canvas.width, canvas.height * 0.12);
+
+  const southIce = ctx.createLinearGradient(0, canvas.height * 0.88, 0, canvas.height);
+  southIce.addColorStop(0, "rgba(200, 220, 240, 0)");
+  southIce.addColorStop(0.5, "rgba(220, 230, 245, 0.6)");
+  southIce.addColorStop(1, "rgba(240, 245, 255, 0.95)");
+  ctx.fillStyle = southIce;
+  ctx.fillRect(0, canvas.height * 0.88, canvas.width, canvas.height * 0.12);
+
+  // Continents with more realistic shapes using multiple overlapping ellipses
+  const continentColor = "#3a7a3a";
+  const desertColor = "#8a7a4a";
+  const highlandColor = "#5a6a4a";
+
+  type LandMass = { x: number; y: number; rx: number; ry: number; color: string; rotation: number };
+  const landMasses: LandMass[] = [
+    // North America
+    { x: 0.18, y: 0.28, rx: 0.08, ry: 0.1, color: continentColor, rotation: -0.2 },
+    { x: 0.15, y: 0.22, rx: 0.06, ry: 0.06, color: continentColor, rotation: 0.1 },
+    { x: 0.22, y: 0.35, rx: 0.03, ry: 0.05, color: continentColor, rotation: 0.3 },
+    // South America
+    { x: 0.25, y: 0.55, rx: 0.04, ry: 0.12, color: continentColor, rotation: 0.15 },
+    { x: 0.24, y: 0.48, rx: 0.05, ry: 0.04, color: continentColor, rotation: -0.1 },
+    { x: 0.26, y: 0.65, rx: 0.03, ry: 0.06, color: continentColor, rotation: -0.1 },
+    // Europe
+    { x: 0.48, y: 0.25, rx: 0.04, ry: 0.05, color: continentColor, rotation: 0.2 },
+    { x: 0.5, y: 0.22, rx: 0.03, ry: 0.03, color: continentColor, rotation: 0 },
+    // Africa
+    { x: 0.5, y: 0.45, rx: 0.06, ry: 0.12, color: continentColor, rotation: 0 },
+    { x: 0.48, y: 0.38, rx: 0.05, ry: 0.04, color: desertColor, rotation: 0.1 },
+    { x: 0.52, y: 0.55, rx: 0.04, ry: 0.06, color: continentColor, rotation: -0.1 },
+    // Asia
+    { x: 0.65, y: 0.25, rx: 0.12, ry: 0.08, color: continentColor, rotation: 0.1 },
+    { x: 0.72, y: 0.22, rx: 0.08, ry: 0.06, color: continentColor, rotation: -0.1 },
+    { x: 0.6, y: 0.3, rx: 0.05, ry: 0.04, color: highlandColor, rotation: 0.2 },
+    { x: 0.75, y: 0.35, rx: 0.04, ry: 0.05, color: continentColor, rotation: 0.3 },
+    // India
+    { x: 0.68, y: 0.42, rx: 0.03, ry: 0.05, color: continentColor, rotation: 0 },
+    // Southeast Asia / Indonesia
+    { x: 0.78, y: 0.45, rx: 0.04, ry: 0.02, color: continentColor, rotation: 0.2 },
+    { x: 0.8, y: 0.48, rx: 0.02, ry: 0.015, color: continentColor, rotation: 0.1 },
+    // Australia
+    { x: 0.85, y: 0.6, rx: 0.05, ry: 0.04, color: desertColor, rotation: -0.1 },
+    { x: 0.84, y: 0.58, rx: 0.03, ry: 0.02, color: continentColor, rotation: 0 },
+    // Antarctica hint
+    { x: 0.5, y: 0.85, rx: 0.15, ry: 0.03, color: "#d0d8e8", rotation: 0 },
   ];
-  for (const c of continents) {
+
+  for (const land of landMasses) {
+    ctx.save();
+    ctx.translate(land.x * canvas.width, land.y * canvas.height);
+    ctx.rotate(land.rotation);
+    ctx.fillStyle = land.color;
     ctx.beginPath();
-    ctx.ellipse(c.x * canvas.width, c.y * canvas.height, (c.w * canvas.width) / 2, (c.h * canvas.height) / 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, land.rx * canvas.width, land.ry * canvas.height, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Add terrain noise to continents
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  function noise2D(x: number, y: number): number {
+    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    return n - Math.floor(n);
+  }
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      // Only add noise to non-ocean pixels (green channel > blue channel indicates land)
+      if (data[i + 1] > data[i + 2] * 0.8) {
+        const n = noise2D(x * 0.08, y * 0.08) * 15 - 7;
+        const fine = noise2D(x * 0.4, y * 0.4) * 6 - 3;
+        data[i] = Math.max(0, Math.min(255, data[i] + n + fine));
+        data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + n + fine));
+        data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + n * 0.5));
+      } else {
+        // Subtle ocean variation
+        const n = noise2D(x * 0.03, y * 0.03) * 8 - 4;
+        data[i] = Math.max(0, Math.min(255, data[i] + n * 0.5));
+        data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + n * 0.3));
+        data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + n));
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  // Cloud layer — soft white wisps (fewer for performance)
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < 25; i++) {
+    const x = seededRandom() * canvas.width;
+    const y = seededRandom() * canvas.height;
+    const rx = 15 + seededRandom() * 50;
+    const ry = 8 + seededRandom() * 20;
+    const cloudGrad = ctx.createRadialGradient(x, y, 0, x, y, rx);
+    cloudGrad.addColorStop(0, "rgba(255, 255, 255, 0.6)");
+    cloudGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.2)");
+    cloudGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = cloudGrad;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, seededRandom() * Math.PI, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const r = Math.random() * 20 + 5;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.globalAlpha = 1.0;
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -159,6 +374,13 @@ export class LunarScene {
   private siteMarker!: THREE.Group;
   private sunLight!: THREE.DirectionalLight;
   private gridGroup = new THREE.Group();
+  private gridRaycaster = new THREE.Raycaster();
+  private gridTooltip: HTMLDivElement | null = null;
+  private siteGuideSvg: SVGSVGElement | null = null;
+  private siteGuideLine: SVGLineElement | null = null;
+  private siteGuideDot: SVGCircleElement | null = null;
+  private siteGuideBadge: HTMLDivElement | null = null;
+  private siteGuideArrow: HTMLSpanElement | null = null;
 
   // Site-level surface objects
   private surfaceGroup = new THREE.Group();
@@ -223,6 +445,7 @@ export class LunarScene {
   private async initScene() {
     await this.buildScene();
     this.setupControls();
+    this.focusCameraOnSelectedSite();
     this.updateView();
     this.animate();
   }
@@ -238,7 +461,7 @@ export class LunarScene {
     /* ── Overview Group ── */
 
     // Moon sphere
-    const moonGeometry = new THREE.SphereGeometry(MOON_SCENE_RADIUS, 64, 32);
+    const moonGeometry = new THREE.SphereGeometry(MOON_SCENE_RADIUS, 128, 64);
     const moonTexture = await loadMoonTexture();
     const moonMaterial = new THREE.MeshStandardMaterial({
       map: moonTexture,
@@ -266,20 +489,41 @@ export class LunarScene {
     this.buildSelenographicGrid();
     this.overviewGroup.add(this.gridGroup);
 
-    // Sun (overview)
+    // Sun (overview) — multi-layer smooth halo for gradual light falloff
     const sunScale = SUN_RADIUS_KM * OVERVIEW_SCALE;
-    const sunGeometry = new THREE.SphereGeometry(sunScale, 32, 16);
-    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    const sunGeometry = new THREE.SphereGeometry(sunScale, 16, 8);
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
     this.sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
 
-    // Sun Corona Glow
-    const sunGlowGeometry = new THREE.SphereGeometry(sunScale * 1.8, 32, 16);
-    const sunGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xfbbf24,
+    // Inner glow — warm yellow, close to the Sun surface
+    const sunInnerGlowGeom = new THREE.SphereGeometry(sunScale * 1.6, 16, 8);
+    const sunInnerGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xffee88,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.45,
+      side: THREE.BackSide,
     });
-    this.sunMesh.add(new THREE.Mesh(sunGlowGeometry, sunGlowMaterial));
+    this.sunMesh.add(new THREE.Mesh(sunInnerGlowGeom, sunInnerGlowMat));
+
+    // Mid glow — golden orange, bridges inner and outer
+    const sunMidGlowGeom = new THREE.SphereGeometry(sunScale * 2.5, 16, 8);
+    const sunMidGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xffcc55,
+      transparent: true,
+      opacity: 0.2,
+      side: THREE.BackSide,
+    });
+    this.sunMesh.add(new THREE.Mesh(sunMidGlowGeom, sunMidGlowMat));
+
+    // Outer glow — soft amber, extends far for smooth light transition
+    const sunOuterGlowGeom = new THREE.SphereGeometry(sunScale * 4, 16, 8);
+    const sunOuterGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xffaa33,
+      transparent: true,
+      opacity: 0.08,
+      side: THREE.BackSide,
+    });
+    this.sunMesh.add(new THREE.Mesh(sunOuterGlowGeom, sunOuterGlowMat));
     this.overviewGroup.add(this.sunMesh);
 
     // Solar Directional Light
@@ -289,9 +533,9 @@ export class LunarScene {
     this.sunLight.shadow.mapSize.height = 1024;
     this.overviewGroup.add(this.sunLight);
 
-    // Earth (overview)
+    // Earth (overview) — multi-layer atmosphere for stronger, smoother glow
     const earthScale = EARTH_RADIUS_KM * OVERVIEW_SCALE;
-    const earthGeometry = new THREE.SphereGeometry(earthScale, 32, 16);
+    const earthGeometry = new THREE.SphereGeometry(earthScale, 24, 12);
     const earthTexture = await loadEarthTexture();
     const earthMaterial = new THREE.MeshStandardMaterial({
       map: earthTexture,
@@ -299,6 +543,37 @@ export class LunarScene {
       metalness: 0.1,
     });
     this.earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
+
+    // Inner atmosphere — bright blue, close to surface
+    const atmosInnerGeom = new THREE.SphereGeometry(earthScale * 1.06, 16, 8);
+    const atmosInnerMat = new THREE.MeshBasicMaterial({
+      color: 0x6699ff,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.BackSide,
+    });
+    this.earthMesh.add(new THREE.Mesh(atmosInnerGeom, atmosInnerMat));
+
+    // Mid atmosphere — deeper blue, extends further
+    const atmosMidGeom = new THREE.SphereGeometry(earthScale * 1.12, 16, 8);
+    const atmosMidMat = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.BackSide,
+    });
+    this.earthMesh.add(new THREE.Mesh(atmosMidGeom, atmosMidMat));
+
+    // Outer haze — light blue, soft edge
+    const atmosOuterGeom = new THREE.SphereGeometry(earthScale * 1.2, 16, 8);
+    const atmosOuterMat = new THREE.MeshBasicMaterial({
+      color: 0x88bbff,
+      transparent: true,
+      opacity: 0.08,
+      side: THREE.BackSide,
+    });
+    this.earthMesh.add(new THREE.Mesh(atmosOuterGeom, atmosOuterMat));
+
     this.overviewGroup.add(this.earthMesh);
 
     // Landing Site Pin Marker
@@ -399,49 +674,117 @@ export class LunarScene {
     this.buildCompassRose();
     this.surfaceGroup.add(this.compassGroup);
 
-    // Surface Sun
-    const surfaceSunGeom = new THREE.SphereGeometry(0.35, 32, 16);
-    const surfaceSunMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    // Surface Sun — multi-layer smooth halo (closer view, more detail)
+    const surfaceSunGeom = new THREE.SphereGeometry(0.35, 24, 12);
+    const surfaceSunMat = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
     this.surfaceSunMesh = new THREE.Mesh(surfaceSunGeom, surfaceSunMat);
-    const surfaceSunGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(0.65, 32, 16),
-      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.4 }),
+
+    // Inner glow — warm yellow, close to surface
+    const surfSunInnerGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 16, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0.5, side: THREE.BackSide }),
     );
-    this.surfaceSunMesh.add(surfaceSunGlow);
+    this.surfaceSunMesh.add(surfSunInnerGlow);
+
+    // Mid glow — golden bridge layer
+    const surfSunMidGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.7, 16, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffcc55, transparent: true, opacity: 0.25, side: THREE.BackSide }),
+    );
+    this.surfaceSunMesh.add(surfSunMidGlow);
+
+    // Outer glow — soft amber, far reach
+    const surfSunOuterGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(1.0, 16, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.1, side: THREE.BackSide }),
+    );
+    this.surfaceSunMesh.add(surfSunOuterGlow);
+
     this.surfaceGroup.add(this.surfaceSunMesh);
 
-    // Surface Earth
-    const surfaceEarthGeom = new THREE.SphereGeometry(0.45, 32, 16);
+    // Surface Earth with multi-layer atmosphere (closer view)
+    const surfaceEarthGeom = new THREE.SphereGeometry(0.45, 24, 12);
     const surfaceEarthMat = new THREE.MeshStandardMaterial({
       map: earthTexture,
       roughness: 0.6,
     });
     this.surfaceEarthMesh = new THREE.Mesh(surfaceEarthGeom, surfaceEarthMat);
+
+    // Inner atmosphere — bright blue, close to surface
+    const surfAtmosInnerGeom = new THREE.SphereGeometry(0.49, 16, 8);
+    const surfAtmosInnerMat = new THREE.MeshBasicMaterial({
+      color: 0x6699ff,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.BackSide,
+    });
+    this.surfaceEarthMesh.add(new THREE.Mesh(surfAtmosInnerGeom, surfAtmosInnerMat));
+
+    // Mid atmosphere — deeper blue
+    const surfAtmosMidGeom = new THREE.SphereGeometry(0.54, 16, 8);
+    const surfAtmosMidMat = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.18,
+      side: THREE.BackSide,
+    });
+    this.surfaceEarthMesh.add(new THREE.Mesh(surfAtmosMidGeom, surfAtmosMidMat));
+
+    // Outer haze — light blue, soft edge
+    const surfHazeGeom = new THREE.SphereGeometry(0.62, 16, 8);
+    const surfHazeMat = new THREE.MeshBasicMaterial({
+      color: 0x88bbff,
+      transparent: true,
+      opacity: 0.08,
+      side: THREE.BackSide,
+    });
+    this.surfaceEarthMesh.add(new THREE.Mesh(surfHazeGeom, surfHazeMat));
+
     this.surfaceGroup.add(this.surfaceEarthMesh);
   }
 
   private buildSelenographicGrid() {
-    const r = MOON_SCENE_RADIUS * 1.001;
+    const r = MOON_SCENE_RADIUS * 1.003;
 
-    // Equator ring
-    const eqCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
-    const eqPoints = eqCurve.getPoints(90).map((p) => new THREE.Vector3(p.x, 0, p.y));
-    const eqGeom = new THREE.BufferGeometry().setFromPoints(eqPoints);
-    const eqLine = new THREE.Line(
-      eqGeom,
-      new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.25 }),
-    );
-    this.gridGroup.add(eqLine);
+    const addRing = (points: THREE.Vector3[], color: THREE.Color, phase: number, label: string) => {
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const vertexColors = new Float32Array(points.length * 3);
+      const highlightColor = new THREE.Color(0xf7f7f8);
 
-    // Prime meridian ring
-    const pmCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
-    const pmPoints = pmCurve.getPoints(90).map((p) => new THREE.Vector3(p.x, p.y, 0));
-    const pmGeom = new THREE.BufferGeometry().setFromPoints(pmPoints);
-    const pmLine = new THREE.Line(
-      pmGeom,
-      new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.25 }),
-    );
-    this.gridGroup.add(pmLine);
+      for (let i = 0; i < points.length; i++) {
+        const progress = i / (points.length - 1);
+        const glint = (Math.cos(progress * Math.PI * 4 + phase) + 1) / 2;
+        const vertexColor = color.clone().lerp(highlightColor, 0.12 + glint * 0.48);
+        vertexColor.toArray(vertexColors, i * 3);
+      }
+
+      geometry.setAttribute("color", new THREE.BufferAttribute(vertexColors, 3));
+      const glowLine = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+      }));
+      const detailLine = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+      }));
+      glowLine.userData.gridLabel = label;
+      glowLine.userData.gridColor = `#${color.getHexString()}`;
+      detailLine.userData.gridLabel = label;
+      detailLine.userData.gridColor = `#${color.getHexString()}`;
+      this.gridGroup.add(glowLine, detailLine);
+    };
+
+    const equatorCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
+    const equatorPoints = equatorCurve.getPoints(180).map((p) => new THREE.Vector3(p.x, 0, p.y));
+    addRing(equatorPoints, new THREE.Color(0x3b82f6), 0, "Lunar equator · 0° latitude");
+
+    const meridianCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
+    const meridianPoints = meridianCurve.getPoints(180).map((p) => new THREE.Vector3(p.x, p.y, 0));
+    addRing(meridianPoints, new THREE.Color(0xf59e0b), Math.PI / 2, "Prime meridian · 0° longitude");
   }
 
   private buildCompassRose() {
@@ -488,39 +831,107 @@ export class LunarScene {
 
   private addStars() {
     const starsGeometry = new THREE.BufferGeometry();
-    const starCount = 2500;
+    const starCount = 1500;
     const positions = new Float32Array(starCount * 3);
+    const colors = new Float32Array(starCount * 3);
+
+    // Star color palette: white, blue-white, yellow, orange
+    const starColors = [
+      new THREE.Color(0xffffff),  // white
+      new THREE.Color(0xaaccff),  // blue-white
+      new THREE.Color(0xffffcc),  // yellow
+      new THREE.Color(0xffccaa),  // orange
+    ];
 
     for (let i = 0; i < starCount; i++) {
       const i3 = i * 3;
-      const radius = 600 + Math.random() * 600;
+      const radius = 500 + Math.random() * 700;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
 
       positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
       positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
       positions[i3 + 2] = radius * Math.cos(phi);
+
+      // Assign color — brighter stars are bluer
+      const brightness = Math.random();
+      const colorIdx = brightness > 0.8 ? 1 : brightness > 0.5 ? 2 : brightness > 0.2 ? 0 : 3;
+      const color = starColors[colorIdx];
+      colors[i3] = color.r;
+      colors[i3 + 1] = color.g;
+      colors[i3 + 2] = color.b;
     }
 
     starsGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    starsGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
     const starsMaterial = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.6,
+      size: 0.5,
       sizeAttenuation: true,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.9,
     });
     this.scene.add(new THREE.Points(starsGeometry, starsMaterial));
   }
 
   private setupControls() {
     const canvas = this.renderer.domElement;
+    this.gridTooltip = document.createElement("div");
+    this.gridTooltip.className =
+      "pointer-events-none absolute z-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)]/95 px-3 py-2 text-xs font-medium text-[var(--color-text-primary)] shadow-lg backdrop-blur";
+    this.gridTooltip.setAttribute("role", "tooltip");
+    this.gridTooltip.style.display = "none";
+    this.container.appendChild(this.gridTooltip);
+
+    const guideSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    guideSvg.setAttribute("aria-hidden", "true");
+    guideSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:10;display:none";
+    const guideLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    guideLine.setAttribute("stroke", "#f59e0b");
+    guideLine.setAttribute("stroke-opacity", "0.55");
+    guideLine.setAttribute("stroke-width", "1.5");
+    guideLine.setAttribute("stroke-dasharray", "5 7");
+    guideSvg.appendChild(guideLine);
+    const guideDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    guideDot.setAttribute("r", "3.5");
+    guideDot.setAttribute("fill", "#f59e0b");
+    guideDot.setAttribute("stroke", "#f7f7f8");
+    guideDot.setAttribute("stroke-width", "1.5");
+    guideSvg.appendChild(guideDot);
+    this.container.appendChild(guideSvg);
+    this.siteGuideSvg = guideSvg;
+    this.siteGuideLine = guideLine;
+    this.siteGuideDot = guideDot;
+
+    const guideBadge = document.createElement("div");
+    guideBadge.className =
+      "pointer-events-none absolute z-20 flex items-center gap-1 rounded-full border border-[var(--color-accent)] bg-[var(--color-bg-surface)]/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-accent)] shadow-lg backdrop-blur";
+    guideBadge.setAttribute("role", "status");
+    guideBadge.setAttribute("aria-live", "polite");
+    guideBadge.setAttribute("aria-label", "The selected landing site is out of sight. Rotate toward the direction shown.");
+    guideBadge.style.display = "none";
+    const guideArrow = document.createElement("span");
+    guideArrow.textContent = "➤";
+    guideBadge.append(guideArrow, document.createTextNode("SITE"));
+    this.container.appendChild(guideBadge);
+    this.siteGuideBadge = guideBadge;
+    this.siteGuideArrow = guideArrow;
 
     canvas.addEventListener("mousedown", (e: MouseEvent) => {
       this.isDragging = true;
       this.previousMousePosition = { x: e.clientX, y: e.clientY };
+      this.hideGridTooltip();
+      canvas.style.cursor = "grabbing";
     });
 
     canvas.addEventListener("mousemove", (e: MouseEvent) => {
-      if (!this.isDragging) return;
+      if (!this.isDragging) {
+        this.updateGridHover(e);
+        return;
+      }
+
+      this.hideGridTooltip();
 
       const deltaMove = {
         x: e.clientX - this.previousMousePosition.x,
@@ -543,9 +954,13 @@ export class LunarScene {
 
     const stopDrag = () => {
       this.isDragging = false;
+      canvas.style.cursor = "grab";
     };
     canvas.addEventListener("mouseup", stopDrag);
-    canvas.addEventListener("mouseleave", stopDrag);
+    canvas.addEventListener("mouseleave", () => {
+      stopDrag();
+      this.hideGridTooltip();
+    });
 
     canvas.addEventListener(
       "wheel",
@@ -553,7 +968,7 @@ export class LunarScene {
         e.preventDefault();
         if (this.viewMode === "overview") {
           this.targetSpherical.radius *= e.deltaY > 0 ? 1.08 : 0.92;
-          this.targetSpherical.radius = Math.max(2.1, Math.min(18, this.targetSpherical.radius));
+          this.targetSpherical.radius = Math.max(MIN_OVERVIEW_CAMERA_RADIUS, Math.min(18, this.targetSpherical.radius));
         } else {
           // In surface view, adjust FOV / zoom
           this.camera.fov = Math.max(30, Math.min(75, this.camera.fov + (e.deltaY > 0 ? 3 : -3)));
@@ -602,7 +1017,7 @@ export class LunarScene {
           if (touchStartDist > 0) {
             const scale = touchStartDist / dist;
             this.targetSpherical.radius *= scale;
-            this.targetSpherical.radius = Math.max(2.1, Math.min(18, this.targetSpherical.radius));
+            this.targetSpherical.radius = Math.max(MIN_OVERVIEW_CAMERA_RADIUS, Math.min(18, this.targetSpherical.radius));
           }
           touchStartDist = dist;
         }
@@ -656,7 +1071,9 @@ export class LunarScene {
           break;
         case "+":
         case "=":
-          if (this.viewMode === "overview") this.targetSpherical.radius = Math.max(2.1, this.targetSpherical.radius - 0.5);
+          if (this.viewMode === "overview") {
+            this.targetSpherical.radius = Math.max(MIN_OVERVIEW_CAMERA_RADIUS, this.targetSpherical.radius - 0.5);
+          }
           break;
         case "-":
           if (this.viewMode === "overview") this.targetSpherical.radius = Math.min(18, this.targetSpherical.radius + 0.5);
@@ -665,7 +1082,150 @@ export class LunarScene {
     });
 
     canvas.setAttribute("tabindex", "0");
-    canvas.setAttribute("aria-label", "Interactive 3D lunar scene: drag to rotate, scroll to zoom, arrow keys to navigate.");
+    canvas.setAttribute(
+      "aria-label",
+      "Interactive 3D lunar scene: drag to rotate, scroll to zoom, arrow keys to navigate. Blue marks the lunar equator at 0 degrees latitude; amber marks the prime meridian at 0 degrees longitude.",
+    );
+  }
+
+  private updateGridHover(event: MouseEvent) {
+    const tooltip = this.gridTooltip;
+    if (!tooltip || this.viewMode !== "overview") {
+      this.hideGridTooltip();
+      return;
+    }
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      this.hideGridTooltip();
+      return;
+    }
+
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const visibleDistance = Math.max(0.25, this.camera.position.length() - MOON_SCENE_RADIUS);
+    this.gridRaycaster.params.Line!.threshold =
+      (2 * visibleDistance * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 6) / rect.height;
+    this.gridRaycaster.setFromCamera(pointer, this.camera);
+
+    const moonDistance = this.gridRaycaster.intersectObject(this.moonMesh)[0]?.distance ?? Infinity;
+    const hit = this.gridRaycaster
+      .intersectObjects(this.gridGroup.children)
+      .find((intersection) => intersection.distance < moonDistance);
+
+    if (!hit) {
+      this.hideGridTooltip();
+      return;
+    }
+
+    const label = hit?.object.userData.gridLabel;
+    if (typeof label !== "string") {
+      this.hideGridTooltip();
+      return;
+    }
+
+    tooltip.textContent = label;
+    tooltip.style.borderLeft = `3px solid ${hit.object.userData.gridColor}`;
+    tooltip.style.display = "block";
+    const x = event.clientX - rect.left + 14;
+    const y = event.clientY - rect.top + 14;
+    tooltip.style.left = `${Math.max(0, Math.min(x, rect.width - tooltip.offsetWidth))}px`;
+    tooltip.style.top = `${Math.max(0, Math.min(y, rect.height - tooltip.offsetHeight))}px`;
+    this.renderer.domElement.style.cursor = "help";
+  }
+
+  private hideGridTooltip() {
+    if (this.gridTooltip) this.gridTooltip.style.display = "none";
+    this.renderer.domElement.style.cursor = this.isDragging ? "grabbing" : "grab";
+  }
+
+  private focusCameraOnSelectedSite() {
+    const latRad = THREE.MathUtils.degToRad(this.site.latDeg);
+    const lonRad = THREE.MathUtils.degToRad(this.site.eastLonDeg);
+    const siteTheta = Math.PI / 2 - lonRad;
+    const thetaDelta = THREE.MathUtils.euclideanModulo(
+      siteTheta - this.targetSpherical.theta + Math.PI,
+      2 * Math.PI,
+    ) - Math.PI;
+
+    this.targetSpherical.theta += thetaDelta;
+    this.targetSpherical.phi = THREE.MathUtils.clamp(Math.PI / 2 - latRad, 0.1, Math.PI - 0.1);
+    this.targetSpherical.radius = Math.max(
+      MIN_OVERVIEW_CAMERA_RADIUS,
+      Math.min(this.targetSpherical.radius, SITE_FOCUS_CAMERA_RADIUS),
+    );
+  }
+
+  private updateSiteGuide() {
+    const svg = this.siteGuideSvg;
+    const line = this.siteGuideLine;
+    const dot = this.siteGuideDot;
+    const badge = this.siteGuideBadge;
+    const arrow = this.siteGuideArrow;
+    if (!svg || !line || !dot || !badge || !arrow || this.viewMode !== "overview") {
+      this.hideSiteGuide();
+      return;
+    }
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      this.hideSiteGuide();
+      return;
+    }
+
+    this.camera.updateMatrixWorld();
+    const siteNormal = this.siteMarker.position.clone().normalize();
+    const isOnVisibleHemisphere = this.camera.position.dot(siteNormal) > MOON_SCENE_RADIUS;
+    const projectedSite = this.siteMarker.position.clone().project(this.camera);
+    const isOnScreen = Math.abs(projectedSite.x) < 0.92 && Math.abs(projectedSite.y) < 0.92;
+    if (isOnVisibleHemisphere && isOnScreen) {
+      this.hideSiteGuide();
+      return;
+    }
+
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const screenMargin = 20;
+    const endX = THREE.MathUtils.clamp(
+      (projectedSite.x * 0.5 + 0.5) * rect.width,
+      screenMargin,
+      rect.width - screenMargin,
+    );
+    const endY = THREE.MathUtils.clamp(
+      (-projectedSite.y * 0.5 + 0.5) * rect.height,
+      screenMargin,
+      rect.height - screenMargin,
+    );
+    const direction = new THREE.Vector2(endX - centerX, endY - centerY);
+    if (direction.lengthSq() < 1e-8) {
+      const siteInCameraSpace = this.siteMarker.position.clone().applyMatrix4(this.camera.matrixWorldInverse);
+      direction.set(siteInCameraSpace.x, -siteInCameraSpace.y);
+    }
+    if (direction.lengthSq() < 1e-8) direction.set(1, 0);
+    direction.normalize();
+    const badgeX = THREE.MathUtils.clamp(endX - direction.y * 18, 30, rect.width - 30);
+    const badgeY = THREE.MathUtils.clamp(endY + direction.x * 18, 20, rect.height - 20);
+
+    svg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+    line.setAttribute("x1", String(centerX));
+    line.setAttribute("y1", String(centerY));
+    line.setAttribute("x2", String(endX));
+    line.setAttribute("y2", String(endY));
+    dot.setAttribute("cx", String(endX));
+    dot.setAttribute("cy", String(endY));
+    badge.style.left = `${badgeX}px`;
+    badge.style.top = `${badgeY}px`;
+    badge.style.transform = "translate(-50%, -50%)";
+    arrow.style.transform = `rotate(${Math.atan2(direction.y, direction.x)}rad)`;
+    svg.style.display = "block";
+    badge.style.display = "flex";
+  }
+
+  private hideSiteGuide() {
+    if (this.siteGuideSvg) this.siteGuideSvg.style.display = "none";
+    if (this.siteGuideBadge) this.siteGuideBadge.style.display = "none";
   }
 
   private updateView() {
@@ -776,14 +1336,18 @@ export class LunarScene {
   }
 
   public update(site: LunarSite, skyState: SkyState, mask?: HorizonMask | null) {
+    const siteChanged = site.latDeg !== this.site.latDeg || site.eastLonDeg !== this.site.eastLonDeg;
     this.site = site;
     this.skyState = skyState;
     if (mask !== undefined) this.mask = mask;
+    if (siteChanged) this.focusCameraOnSelectedSite();
     this.updateView();
   }
 
   public setViewMode(mode: "overview" | "site-level") {
     this.viewMode = mode;
+    this.hideGridTooltip();
+    this.hideSiteGuide();
     this.updateView();
   }
 
@@ -839,6 +1403,7 @@ export class LunarScene {
 
       this.camera.position.setFromSpherical(this.spherical);
       this.camera.lookAt(0, 0, 0);
+      this.updateSiteGuide();
 
       // Rotate Earth slowly
       this.earthMesh.rotation.y += 0.0001;
@@ -846,7 +1411,12 @@ export class LunarScene {
       // Pulse site pin marker
       const pulse = 1 + Math.sin(Date.now() * 0.004) * 0.15;
       this.siteMarker.scale.setScalar(pulse);
+
+      // Animate Sun glow — subtle pulsing
+      const sunPulse = 0.95 + Math.sin(Date.now() * 0.002) * 0.05;
+      this.sunMesh.scale.setScalar(sunPulse);
     } else {
+      this.hideSiteGuide();
       // Surface view: camera sits at center of local horizon plane (0, 0.4, 0)
       this.surfaceYaw += (this.targetSurfaceYaw - this.surfaceYaw) * 0.12;
       this.surfacePitch += (this.targetSurfacePitch - this.surfacePitch) * 0.12;
@@ -879,6 +1449,9 @@ export class LunarScene {
     if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
     }
+    this.gridTooltip?.remove();
+    this.siteGuideSvg?.remove();
+    this.siteGuideBadge?.remove();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
