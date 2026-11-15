@@ -52,6 +52,32 @@ export const DEFAULT_CONSTRAINTS: Constraint[] = [
   { id: "earth-mask", kind: "earthAboveMask" },
 ];
 
+/** Mean lunar radius used for rough km ↔ degree conversions. */
+const KM_PER_DEG_LAT = 30.32;
+
+/**
+ * Great-circle-style surface distance (km) between two sites.
+ * Uses an equatorial km-per-degree-longitude scaling with latitude correction.
+ */
+export function surfaceDistanceKm(a: LunarSite, b: LunarSite): number {
+  const kmPerDegLon = KM_PER_DEG_LAT * Math.max(0.01, Math.cos((a.latDeg * Math.PI) / 180));
+  const dLatKm = (a.latDeg - b.latDeg) * KM_PER_DEG_LAT;
+  const dLonKm = (a.eastLonDeg - b.eastLonDeg) * kmPerDegLon;
+  return Math.hypot(dLatKm, dLonKm);
+}
+
+/**
+ * Landing sites located near a target site (within `maxKm`), nearest first.
+ * Used by the site info panel to list candidate/related landing sites around a point.
+ */
+export function nearbyLandingSites(site: LunarSite, maxKm: number = 250): LunarSite[] {
+  return PRESET_SITES.filter((s) => s.id !== site.id)
+    .map((s) => ({ site: s, distanceKm: surfaceDistanceKm(site, s) }))
+    .filter((r) => r.distanceKm <= maxKm)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map((r) => r.site);
+}
+
 /** Full scenario state held in memory. */
 export interface ScenarioState {
   readonly version: string;

@@ -10,6 +10,9 @@
  *       • Conversational AI prompt input with instant interface mutation and Undo.
  *   - Compact floating popovers for LOLA Horizon chart, coordinates, and share.
  *   - Clean, quiet micro-interactions, dark translucent glass, zero visual clutter.
+ *   - Clicking the landing site marker opens the detailed Landing Site Info modal:
+ *     mission context, terrain profile, landing-area assessment, detailed lunar map
+ *     with landing ellipse, and nearby landing sites around the selection.
  */
 
 import "./index.css";
@@ -43,18 +46,21 @@ import {
 import { LunarScene } from "./scene";
 import { renderHorizonChart } from "./horizonChart";
 import {
+  QUICK_ACTIONS,
+  executeQuickAction,
+  processMissionQuery,
+  type ChatTurn,
+} from "./aiAssistant";
+import {
   skyAtForDate,
   horizonMaskForSite,
   horizonsVerifyUrl,
   maskElevationAt,
   horizontalPowerProxy,
 } from "./science";
-import {
-  QUICK_ACTIONS,
-  executeQuickAction,
-  processMissionQuery,
-  type ChatTurn,
-} from "./aiAssistant";
+import { createLunarMap, type LunarMapHandle } from "./lunarMap";
+import { nearbyLandingSites, surfaceDistanceKm } from "./scenario";
+import type { LunarSite } from "core";
 
 /* ── DOM helper ── */
 
@@ -133,6 +139,12 @@ let isAdjustOpen = false;
 let isPlayingDiurnal = false;
 let diurnalIntervalId: number | null = null;
 let diurnalSpeed = 1;
+
+/** Backdrop element of the landing-site info modal (kept for cleanup). */
+let siteInfoBackdrop: HTMLElement | null = null;
+
+/** Active lunar map controller of the open landing-site info modal (kept for cleanup). */
+let siteMap: LunarMapHandle | null = null;
 
 /* ── Main Render Entry ── */
 
@@ -264,15 +276,6 @@ function buildTopNavbar(): HTMLElement {
   }, createElement(Link2, { class: "h-3.5 w-3.5" }));
   shareBtn.addEventListener("click", () => openShareModal());
   nav.appendChild(shareBtn);
-
-  // Site Info Button
-  const siteInfoBtn = el("button", {
-    id: "nav-site-info-btn",
-    class: "p-1.5 rounded-full hover:bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] hover:text-white text-xs transition-colors",
-    "aria-label": "View landing site information",
-  }, createElement(Info, { class: "h-3.5 w-3.5" }));
-  siteInfoBtn.addEventListener("click", () => void openSiteInfoModal());
-  nav.appendChild(siteInfoBtn);
 
   return nav;
 }
@@ -1051,16 +1054,52 @@ function openShareModal() {
 
 /* ── Site Info Modal ── */
 
-async function openSiteInfoModal() {
-  const sky = await skyAtForDate(state.site, state.dateUtc, state.hourUtc ?? 12);
-  const { mask } = await horizonMaskForSite(state.site);
+const LANDING_ELLIPSE_KM = 3;
+
+function closeSiteInfoModal(): void {
+  siteInfoBackdrop?.remove();
+  siteInfoBackdrop = null;
+  siteMap?.dispose();
+  siteMap?.locator?.dispose();
+  siteMap = null;
+}
+
+function infoRow(label: string, value: string, valueClass?: string): HTMLElement {
+  return el("div", { class: "flex justify-between" },
+    el("span", { class: "text-[var(--color-text-muted)]" }, label),
+    el("span", { class: valueClass ?? "" }, value),
+  );
+}
+
+function infoSection(title: string, ...content: HTMLElement[]): HTMLElement {
+  const section = el("div", { class: "space-y-2" },
+    el("div", { class: "text-[10px] font-bold text-[var(--color-accent)] uppercase tracking-wider" }, title),
+    ...content,
+  );
+  return section;
+}
+
+function switchSite(next: LunarSite): void {
+  previousState = { ...state };
+  state = { ...state, site: next };
+  syncUrl();
+  void render();
+  showToast(`Switched to ${siteLabel(next.id)}`);
+  // Re-open the site info window focused on the newly selected site.
+  void openSiteInfoModal(next);
+}
+
+async function openSiteInfoModal(site: LunarSite = state.site) {
+  const sky = await skyAtForDate(site, state.dateUtc, state.hourUtc ?? 12);
+  const { mask } = await horizonMaskForSite(site);
   const sunElev = maskElevationAt(mask, sky.sunAzimuthDeg);
   const earthElev = maskElevationAt(mask, sky.earthAzimuthDeg);
   const earthAboveMask = sky.earthElevationDeg > earthElev;
+  const powerProxy = horizontalPowerProxy(sky.sunElevationDeg, sky.sunElevationDeg > sunElev);
 
-  const backdrop = el("div", { class: "modal-backdrop" });
+  const backdrop = el("div", { id: "site-info-backdrop", class: "modal-backdrop" });
   const modal = el("div", {
-    class: "w-[420px] max-w-[95vw] glass-pill rounded-2xl p-5 space-y-4 shadow-2xl text-xs",
+    class: "w-[680px] max-w-[95vw] glass-pill rounded-2xl p-5 space-y-4 shadow-2xl text-xs",
     role: "dialog",
     "aria-label": "Landing site information",
   });
@@ -1069,46 +1108,109 @@ async function openSiteInfoModal() {
     el("span", { class: "flex items-center gap-1.5 font-bold text-[var(--color-accent)] text-xs uppercase tracking-wider" }, createElement(Info, { class: "h-3.5 w-3.5" }), " Landing Site Info"),
     el("button", { class: "text-sm text-[var(--color-text-muted)] hover:text-white", "aria-label": "Close site info" }, createElement(X, { class: "h-4 w-4" })),
   );
-  header.querySelector("button")?.addEventListener("click", () => backdrop.remove());
+  header.querySelector("button")?.addEventListener("click", () => closeSiteInfoModal());
   modal.appendChild(header);
 
-  const rows = el("div", { class: "space-y-2" },
-    el("div", { class: "flex justify-between" },
-      el("span", { class: "text-[var(--color-text-muted)]" }, "Site"),
-      el("span", { class: "font-semibold text-[var(--color-text-primary)]" }, siteLabel(state.site.id)),
-    ),
-    el("div", { class: "flex justify-between" },
-      el("span", { class: "text-[var(--color-text-muted)]" }, "Coordinates"),
-      el("span", { class: "font-mono text-[var(--color-text-primary)]" }, `${state.site.latDeg.toFixed(2)}°, ${state.site.eastLonDeg.toFixed(2)}°`),
-    ),
-    el("div", { class: "flex justify-between" },
-      el("span", { class: "text-[var(--color-text-muted)]" }, "Epoch"),
-      el("span", { class: "font-mono text-[var(--color-text-primary)]" }, `${state.dateUtc} ${String(state.hourUtc ?? 12).padStart(2, "0")}:00 UTC`),
-    ),
-    el("div", { class: "flex justify-between" },
-      el("span", { class: "text-[var(--color-text-muted)]" }, "Sun Elevation"),
-      el("span", { class: `font-mono font-bold ${sky.sunElevationDeg > sunElev ? "text-[var(--color-sun)]" : "text-[var(--color-text-secondary)]"}` }, `${sky.sunElevationDeg.toFixed(1)}°`),
-    ),
-    el("div", { class: "flex justify-between" },
-      el("span", { class: "text-[var(--color-text-muted)]" }, "Earth Elevation"),
-      el("span", { class: `font-mono font-bold ${earthAboveMask ? "text-[var(--color-meets)]" : "text-[var(--color-misses)]"}` }, `${sky.earthElevationDeg.toFixed(1)}°`),
-    ),
-  );
-  modal.appendChild(rows);
+  const body = el("div", { class: "max-h-[70vh] overflow-y-auto pr-1" });
+
+  // Two-column layout: contextual data on the left, detailed map on the right.
+  const contentGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-2 gap-4" });
+  const leftCol = el("div", { class: "space-y-4" });
+  const rightCol = el("div", { class: "space-y-4" });
+  body.appendChild(contentGrid);
+  contentGrid.appendChild(leftCol);
+  contentGrid.appendChild(rightCol);
+
+  // 1. Mission context for the selected landing site.
+  leftCol.appendChild(infoSection("Mission Context",
+    infoRow("Site", siteLabel(site.id)),
+    infoRow("Coordinates", `${site.latDeg.toFixed(2)}° N / ${site.eastLonDeg.toFixed(2)}° E`),
+    infoRow("Epoch", `${state.dateUtc} ${String(state.hourUtc ?? 12).padStart(2, "0")}:00 UTC`),
+    infoRow("Sun Elevation", `${sky.sunElevationDeg.toFixed(1)}°`, sky.sunElevationDeg > sunElev ? "text-[var(--color-sun)] font-mono font-bold" : "text-[var(--color-text-secondary)] font-mono font-bold"),
+    infoRow("Earth Elevation", `${sky.earthElevationDeg.toFixed(1)}°`, earthAboveMask ? "text-[var(--color-meets)] font-mono font-bold" : "text-[var(--color-misses)] font-mono font-bold"),
+    infoRow("Solar Power Proxy", `${Math.round(powerProxy * 100)}%`),
+  ));
+
+  // 2. Terrain profile: tallest skyline obstruction and relief variation.
+  let terrainMaxObstructionDeg = Number.NaN;
+  let terrainVariationDeg = Number.NaN;
+  if (mask && mask.elevationDeg && mask.elevationDeg.length > 0) {
+    const elevations = [...mask.elevationDeg];
+    const maxElev = Math.max(...elevations);
+    const minElev = Math.min(...elevations);
+    terrainMaxObstructionDeg = maxElev;
+    terrainVariationDeg = maxElev - minElev;
+  }
+  leftCol.appendChild(infoSection("Terrain Profile",
+    infoRow("Skyline Obstruction", Number.isFinite(terrainMaxObstructionDeg) ? `${terrainMaxObstructionDeg.toFixed(2)}°` : "—"),
+    infoRow("Skyline Relief Variation", Number.isFinite(terrainVariationDeg) ? `${terrainVariationDeg.toFixed(2)}°` : "—"),
+  ));
+
+  // 3. Landing area assessment across the 3 km dispersion grid.
+  const { checkLandingArea } = await import("./science");
+  const area = await checkLandingArea(site, state.dateUtc, state.hourUtc ?? 12, LANDING_ELLIPSE_KM, state.constraints);
+  const areaPct = area.total > 0 ? Math.round((area.meets / area.total) * 100) : 0;
+  leftCol.appendChild(infoSection("Landing Area Assessment (3 km)",
+    infoRow("Dispersion Points", `${area.gridPoints} evaluated`),
+    infoRow("Area Meets Constraints", `${areaPct}%`, areaPct >= 80 ? "text-[var(--color-meets)] font-bold" : "text-[var(--color-warning)] font-bold"),
+    infoRow("Sun Elevation Range", `${area.sunElevMin.toFixed(1)}° – ${area.sunElevMax.toFixed(1)}°`),
+    infoRow("Earth Elevation Range", `${area.earthElevMin.toFixed(1)}° – ${area.earthElevMax.toFixed(1)}°`),
+  ));
+
+  // 4. Detailed lunar map with landing ellipse and nearby landing sites (right column).
+  rightCol.appendChild(infoSection("Detailed Lunar Map",
+    el("div", { class: "text-[10px] text-[var(--color-text-muted)]" }, "Terrain map with landing ellipse and nearby landing sites."),
+  ));
+  const mapHost = el("div", { id: "site-map-host", class: "relative w-full h-[300px] rounded-lg border border-[var(--color-border)] bg-black/40 overflow-hidden" });
+  rightCol.appendChild(mapHost);
+
+  // 5. Nearby landing sites around the selected point.
+  const nearby = nearbyLandingSites(site);
+  const nearbyList = el("div", { class: "space-y-1" });
+  for (const n of nearby) {
+    const row = el("button", {
+      class: "w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-[var(--color-bg-input)] hover:bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-left transition-colors",
+    },
+      el("span", { class: "text-[11px] font-semibold text-[var(--color-text-primary)]" }, siteLabel(n.id)),
+      el("span", { class: "font-mono text-[9px] text-[var(--color-text-muted)]" }, `${surfaceDistanceKm(site, n).toFixed(0)} km`),
+    );
+    row.addEventListener("click", () => {
+      closeSiteInfoModal();
+      switchSite(n);
+    });
+    nearbyList.appendChild(row);
+  }
+  rightCol.appendChild(infoSection("Nearby Landing Sites", nearbyList));
+
+  modal.appendChild(body);
 
   const closeBtn = el("button", {
     class: "w-full py-2 rounded-lg bg-[var(--color-bg-elevated)] hover:bg-[var(--color-border)] font-semibold text-[11px] text-white transition-colors",
   }, "Close");
-  closeBtn.addEventListener("click", () => backdrop.remove());
+  closeBtn.addEventListener("click", () => closeSiteInfoModal());
   modal.appendChild(closeBtn);
 
   backdrop.appendChild(modal);
   backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop) backdrop.remove();
+    if (e.target === backdrop) closeSiteInfoModal();
   });
   document.body.appendChild(backdrop);
-}
+  siteInfoBackdrop = backdrop;
 
+  // Mount the competition-style lunar map (NASA WMTS basemap + polar viewport)
+  // and focus it on the selected landing site.
+  siteMap = createLunarMap({
+    container: mapHost,
+    selected: site,
+    nearbySites: nearbyLandingSites(site),
+    ellipseRadiusKm: LANDING_ELLIPSE_KM,
+    onSelect: (nearby) => {
+      closeSiteInfoModal();
+      switchSite(nearby);
+    },
+  });
+  siteMap.fitToSite(site);
+}
 
 /* ── Scene Initialization ── */
 
@@ -1122,6 +1224,7 @@ async function initSceneAndData() {
       skyState: sky,
       mask,
       viewMode: state.viewMode,
+      onSiteMarkerClick: (site) => void openSiteInfoModal(site),
     });
   }
   updateTopNavbar();
@@ -1152,6 +1255,7 @@ document.addEventListener("keydown", (e) => {
     isAdjustOpen = false;
     document.getElementById("telemetry-popover")?.remove();
     document.getElementById("adjust-popover")?.remove();
+    closeSiteInfoModal();
   }
 });
 

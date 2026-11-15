@@ -140,6 +140,8 @@ export interface SceneOptions {
   skyState: SkyState;
   mask?: HorizonMask | null;
   viewMode: "overview" | "site-level";
+  /** Invoked when the user clicks the landing site marker in the scene. */
+  onSiteMarkerClick?: (site: LunarSite) => void;
 }
 
 export class LunarScene {
@@ -173,6 +175,9 @@ export class LunarScene {
   private mask: HorizonMask | null = null;
   private viewMode: "overview" | "site-level";
 
+  /** Callback fired on landing-site marker click (overview mode). */
+  private onSiteMarkerClick?: (site: LunarSite) => void;
+
   // Controls state
   private isDragging = false;
   private previousMousePosition = { x: 0, y: 0 };
@@ -191,6 +196,7 @@ export class LunarScene {
     this.skyState = options.skyState;
     this.mask = options.mask ?? null;
     this.viewMode = options.viewMode;
+    this.onSiteMarkerClick = options.onSiteMarkerClick;
 
     // Scene
     this.scene = new THREE.Scene();
@@ -301,6 +307,12 @@ export class LunarScene {
     const pinMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
     const pinMesh = new THREE.Mesh(pinGeometry, pinMaterial);
     this.siteMarker.add(pinMesh);
+
+    // Invisible hit-area sphere so the landing site is easy to click
+    const hitAreaGeometry = new THREE.SphereGeometry(0.3, 12, 8);
+    const hitAreaMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+    const hitArea = new THREE.Mesh(hitAreaGeometry, hitAreaMaterial);
+    this.siteMarker.add(hitArea);
 
     // Flag group: will be oriented to point outward from moon surface
     const flagGroup = new THREE.Group();
@@ -599,6 +611,29 @@ export class LunarScene {
     );
 
     canvas.addEventListener("touchend", stopDrag);
+
+    // Landing site marker click → forward to app callback (ignore drags)
+    let downPos: { x: number; y: number } | null = null;
+    canvas.addEventListener("mousedown", (e: MouseEvent) => {
+      downPos = { x: e.clientX, y: e.clientY };
+    });
+    canvas.addEventListener("mouseup", (e: MouseEvent) => {
+      const start = downPos;
+      downPos = null;
+      if (!start) return;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) return; // was a drag
+      if (this.viewMode !== "overview") return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(ndc, this.camera);
+      const hits = raycaster.intersectObject(this.siteMarker, true);
+      if (hits.length > 0) this.onSiteMarkerClick?.(this.site);
+    });
 
     // Keyboard navigation
     canvas.addEventListener("keydown", (e: KeyboardEvent) => {

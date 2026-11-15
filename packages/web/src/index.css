@@ -188,3 +188,356 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   justify-content: center;
 }
+
+/* ── Lunar Map: NASA WMTS basemap + polar viewport (ported from competition) ── */
+
+.lunar-map {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  min-width: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+.lunar-map .projected-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lunar-map .projected-map:active {
+  cursor: grabbing;
+}
+
+.polar-map-coverage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.moon-basemap,
+.nasa-tile-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.nasa-moon-tile {
+  position: absolute;
+  display: block;
+  max-width: none;
+  user-select: none;
+}
+
+.map-annotations {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.map-annotation {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: scale(var(--annotation-scale, 1));
+  transform-origin: 0 0;
+  transition: transform 750ms cubic-bezier(0.22, 1, 0.36, 1);
+  --spot-color: #96bea5;
+  --spot-fill: #96bea522;
+}
+
+.map-annotation.marginal {
+  --spot-color: #d6b87a;
+  --spot-fill: #d6b87a22;
+}
+
+.map-annotation.excluded {
+  --spot-color: #969696;
+  --spot-fill: #96969622;
+}
+
+.map-annotation:hover,
+.map-annotation:focus-within {
+  z-index: 3;
+}
+
+.map-annotation.is-selected {
+  z-index: 4;
+}
+
+.map-annotation .spot-marker,
+.map-annotation .spot-callout {
+  pointer-events: auto;
+}
+
+.spot-marker {
+  position: absolute;
+  left: -12px;
+  top: -12px;
+  width: 24px;
+  height: 24px;
+  border: 2px solid #e9e7ed;
+  border-radius: 50%;
+  background: var(--spot-fill);
+  box-shadow: 0 2px 8px #0007;
+  transition: box-shadow 180ms ease;
+  cursor: pointer;
+}
+
+.is-selected > .spot-marker {
+  box-shadow: 0 0 0 5px #ffffff1c, 0 0 0 7px var(--spot-color), 0 3px 12px #0007;
+}
+
+.spot-callout {
+  position: absolute;
+  bottom: 26px;
+  left: 0;
+  transform: translateX(-50%);
+  width: 150px;
+  padding: 11px 12px;
+  border: 2px solid #605d69;
+  border-radius: 10px;
+  background: #2d2c32f5;
+  color: #eeedf1;
+  text-align: left;
+  box-shadow: 0 5px 18px #0005, inset 0 1px #ffffff08;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.spot-callout::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  left: calc(50% - 5px);
+  bottom: -7px;
+  transform: rotate(45deg);
+  background: #2d2c32;
+  border-bottom: 2px solid #605d69;
+  border-right: 2px solid #605d69;
+  transition: border-color 180ms ease;
+}
+
+.spot-callout strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+
+.spot-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.spot-summary > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #c2beca;
+}
+
+.spot-summary i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--spot-color);
+}
+
+.spot-summary b {
+  color: #eeedf1;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.spot-callout:hover {
+  border-color: #91899f;
+  background: #35333c;
+}
+
+.is-selected > .spot-callout {
+  border-color: var(--spot-color);
+  box-shadow: 0 0 0 1px var(--spot-color), 0 6px 20px #0006;
+}
+
+.is-selected > .spot-callout::after {
+  border-color: var(--spot-color);
+}
+
+.map-ellipse-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.map-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  z-index: 5;
+}
+
+.map-controls button {
+  padding: 8px 12px;
+  border: 1px solid #62596e;
+  border-radius: 6px;
+  background: #292331;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.map-controls button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.map-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  padding: 8px;
+  background: #191522df;
+  border: 1px solid #ffffff14;
+  border-radius: 10px;
+  color: #ded8e6;
+  font-size: 12px;
+  z-index: 5;
+  pointer-events: none;
+  line-height: 1.7;
+}
+
+.map-legend span {
+  color: #aaa6b3;
+}
+
+.moon-locator {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 140px;
+  padding: 10px;
+  border: 1px solid #595360;
+  border-radius: 11px;
+  background: #29282de8;
+  box-shadow: 0 4px 18px #0004;
+  pointer-events: none;
+}
+
+.locator-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #ddd8e7;
+}
+
+.locator-title > span {
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  background: #a88ae51a;
+  color: #c8b9e8;
+}
+
+.locator-globe {
+  position: relative;
+  width: 100%;
+  height: 96px;
+}
+
+.locator-globe canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.locator-position-indicator {
+  position: absolute;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #d4c8ff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #b5a2ff16;
+  box-shadow: 0 0 0 4px #b5a2ff20, 0 1px 5px #0009;
+  pointer-events: none;
+}
+
+.locator-position-indicator::after {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #f1eaff;
+}
+
+.locator-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #d2c8e5;
+  font-size: 10px;
+}
+
+.locator-caption i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: #b5a2ff;
+}
+
+.moon-locator > small {
+  display: block;
+  margin-top: 5px;
+  text-align: center;
+  color: #aaa5b5;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.locator-unavailable {
+  color: #aaa5b5;
+  font-size: 10px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-annotation,
+  .spot-callout,
+  .spot-callout::after,
+  .spot-marker,
+  .map-camera {
+    transition: none;
+  }
+}

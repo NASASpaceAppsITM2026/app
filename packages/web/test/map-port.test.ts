@@ -1,0 +1,57 @@
+import { describe, expect, it } from "vitest";
+import { projectSite, unprojectSite } from "../src/lunar-projection";
+import { polarRadius, fitPolarViewport, initialPolarViewport, constrainPolarView } from "../src/polar-view";
+import { moonTiles } from "../src/moon-tiles";
+
+describe("ported lunar map projection", () => {
+  it("projects the south pole to the map origin", () => {
+    expect(projectSite(-90, 0).y).toBe(0);
+    expect(projectSite(-90, 180).x).toBe(0);
+  });
+
+  it("round-trips unproject for a south polar site", () => {
+    const point = projectSite(-85, 123.4);
+    const back = unprojectSite(point.x, point.y);
+    expect(back.latitude).toBeCloseTo(-85, 5);
+    expect(back.longitude).toBeCloseTo(123.4, 5);
+  });
+});
+
+describe("ported polar viewport math", () => {
+  it("keeps viewports inside the supported polar cap", () => {
+    const clamped = constrainPolarView({ xmin: -1e9, ymin: -1e9, xmax: 1e9, ymax: 1e9 });
+    expect(clamped.xmin).toBeGreaterThanOrEqual(-polarRadius);
+    expect(clamped.xmax).toBeLessThanOrEqual(polarRadius);
+    expect(clamped.ymin).toBeGreaterThanOrEqual(-polarRadius);
+    expect(clamped.ymax).toBeLessThanOrEqual(polarRadius);
+  });
+
+  it("starts with a viewport inside the polar cap", () => {
+    const box = initialPolarViewport(1);
+    expect(box.xmax - box.xmin).toBeGreaterThan(0);
+    expect(box.xmax).toBeLessThanOrEqual(polarRadius * 2);
+    expect(box.ymax - box.ymin).toBeGreaterThan(0);
+  });
+
+  it("fits a site-sized viewport around a target point", () => {
+    const site = projectSite(-86, 2.7);
+    const box = fitPolarViewport({ xmin: site.x - 2000, xmax: site.x + 2000, ymin: site.y - 2000, ymax: site.y + 2000 }, 1);
+    expect(box.xmax - box.xmin).toBeGreaterThan(0);
+    expect(box.xmax - box.xmin).toBeGreaterThan(0);
+    expect(Math.abs(((box.xmin + box.xmax) / 2) - site.x)).toBeLessThan(10);
+    expect(Math.abs(((box.ymin + box.ymax) / 2) - site.y)).toBeLessThan(10);
+  });
+});
+
+describe("ported NASA WMTS moon tiles", () => {
+  it("selects visible LOLA shaded-relief tiles for a south polar viewport", () => {
+    const layers = moonTiles({ xmin: -50000, ymin: -50000, xmax: 50000, ymax: 50000 }, 800);
+    expect(layers.length).toBeGreaterThan(0);
+    expect(layers[0].tiles.length).toBeGreaterThan(0);
+    for (const tile of layers[0].tiles) {
+      expect(tile.url).toContain("https://trek.nasa.gov/tiles/Moon/SP/");
+      expect(tile.width).toBeGreaterThan(0);
+      expect(tile.height).toBeGreaterThan(0);
+    }
+  });
+});

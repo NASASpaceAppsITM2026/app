@@ -5,6 +5,8 @@ import {
   scenarioFromQuery,
   PRESET_SITES,
   siteLabel,
+  nearbyLandingSites,
+  surfaceDistanceKm,
 } from "../src/scenario";
 import {
   QUICK_ACTIONS,
@@ -57,6 +59,34 @@ describe("scenario state and serialization", () => {
     expect(siteLabel("apollo15")).toBe("Apollo 15 Landing Site");
     expect(siteLabel("apollo17")).toBe("Apollo 17 Landing Site");
     expect(siteLabel("luna16")).toBe("Luna 16 Landing Site");
+  });
+});
+
+describe("landing site proximity helpers", () => {
+  it("computes surface distance between two sites", () => {
+    const a = PRESET_SITES[0];
+    const b = PRESET_SITES[1];
+    const dist = surfaceDistanceKm(a, b);
+
+    expect(dist).toBeGreaterThan(0);
+    expect(dist).toBeLessThan(1000);
+  });
+
+  it("returns nearby landing sites sorted by distance, excluding the site itself", () => {
+    const shackleton = PRESET_SITES[0];
+    const nearby = nearbyLandingSites(shackleton);
+
+    expect(nearby.length).toBeGreaterThan(0);
+    expect(nearby.map((s) => s.id)).not.toContain(shackleton.id);
+    for (let i = 1; i < nearby.length; i++) {
+      expect(surfaceDistanceKm(shackleton, nearby[i - 1])).toBeLessThanOrEqual(surfaceDistanceKm(shackleton, nearby[i]));
+    }
+  });
+
+  it("returns no nearby landing sites beyond the default radius for isolated sites", () => {
+    const apollo11 = PRESET_SITES.find((s) => s.id === "apollo11");
+    expect(apollo11).toBeDefined();
+    expect(nearbyLandingSites(apollo11!)).toHaveLength(0);
   });
 });
 
