@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "core": "workspace:*",
+    "lucide": "^1.73.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

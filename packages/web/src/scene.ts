@@ -1,41 +1,35 @@
 /**
  * 3D lunar scene using Three.js.
  *
- * Renders:
- * - A procedural Moon sphere with crater-like noise texture
- * - Sun as a glowing sphere with directional light
- * - Earth as a smaller sphere with blue-green coloring
- * - Landing site markers at selenographic coordinates
- * - Orbit controls for rotation and zoom
+ * Provides two interconnected view modes:
+ * 1. Overview Mode: Moon-centered view with Sun and Earth context at compressed distances,
+ *    sub-solar terminator shadow, selenographic grid lines, and landing site pin.
+ * 2. Site-Level Surface Mode: Local horizon view from the landing site looking out across
+ *    the lunar terrain, with ground disc, 360° compass rose (N, E, S, W), 0° horizon line,
+ *    3D LOLA terrain silhouette profile, and Sun and Earth positioned at exact AZ-EL.
  *
- * Two view modes:
- * - Overview: compressed distances showing all three bodies
- * - Site-level: local horizon view from the landing site
+ * Implements smooth OrbitControls navigation, camera presets, touch support, and keyboard controls.
  */
 
 import * as THREE from "three";
-import type { LunarSite, SkyState } from "core";
+import type { HorizonMask, LunarSite, SkyState } from "core";
 
 /* ── Constants ── */
 
 const MOON_RADIUS_KM = 1737.4;
 const EARTH_RADIUS_KM = 6371;
 const SUN_RADIUS_KM = 696_340;
-const _EARTH_MOON_DIST_KM = 384_400;
-const _SUN_MOON_DIST_KM = 149_600_000;
+const MOON_EARTH_DISTANCE_KM = 384_400;
+const SUN_DISTANCE_KM = 149_600_000;
 
-// Scene scale: 1 unit = 1000 km for overview
+// Overview scale: 1 unit = 1000 km
 const OVERVIEW_SCALE = 0.001;
-
-/* ── Moon Texture ── */
+const MOON_SCENE_RADIUS = MOON_RADIUS_KM * OVERVIEW_SCALE; // ~1.7374 units
 
 const MOON_TEXTURE_URL = "/textures/moon.jpg";
 const EARTH_TEXTURE_URL = "/textures/earth.png";
 
-/**
- * Load the real Moon texture from the bundled image.
- * Falls back to a procedural texture if the image fails to load.
- */
+/** Load Moon texture with procedural fallback. */
 function loadMoonTexture(): Promise<THREE.Texture> {
   return new Promise((resolve) => {
     const loader = new THREE.TextureLoader();
@@ -48,16 +42,13 @@ function loadMoonTexture(): Promise<THREE.Texture> {
       },
       undefined,
       () => {
-        // Fallback to procedural texture
-        console.warn("Could not load moon.jpg, using procedural texture");
         resolve(createProceduralMoonTexture());
       },
     );
   });
 }
 
-/** Fallback procedural moon texture if the image fails to load. */
-function createProceduralMoonTexture(size: number = 512): THREE.CanvasTexture {
+function createProceduralMoonTexture(size = 512): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size / 2;
@@ -89,7 +80,7 @@ function createProceduralMoonTexture(size: number = 512): THREE.CanvasTexture {
   return texture;
 }
 
-/** Load the real Earth texture from the bundled image. Falls back to procedural. */
+/** Load Earth texture with procedural fallback. */
 function loadEarthTexture(): Promise<THREE.Texture> {
   return new Promise((resolve) => {
     const loader = new THREE.TextureLoader();
@@ -102,15 +93,13 @@ function loadEarthTexture(): Promise<THREE.Texture> {
       },
       undefined,
       () => {
-        console.warn("Could not load earth.png, using procedural texture");
         resolve(createProceduralEarthTexture());
       },
     );
   });
 }
 
-/** Fallback procedural Earth texture. */
-function createProceduralEarthTexture(size: number = 256): THREE.CanvasTexture {
+function createProceduralEarthTexture(size = 256): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size / 2;
@@ -125,11 +114,7 @@ function createProceduralEarthTexture(size: number = 256): THREE.CanvasTexture {
   ];
   for (const c of continents) {
     ctx.beginPath();
-    ctx.ellipse(
-      c.x * canvas.width, c.y * canvas.height,
-      c.w * canvas.width / 2, c.h * canvas.height / 2,
-      0, 0, Math.PI * 2,
-    );
+    ctx.ellipse(c.x * canvas.width, c.y * canvas.height, (c.w * canvas.width) / 2, (c.h * canvas.height) / 2, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
@@ -147,12 +132,13 @@ function createProceduralEarthTexture(size: number = 256): THREE.CanvasTexture {
   return texture;
 }
 
-/* ── Scene State ── */
+/* ── Scene Options ── */
 
 export interface SceneOptions {
   container: HTMLElement;
   site: LunarSite;
   skyState: SkyState;
+  mask?: HorizonMask | null;
   viewMode: "overview" | "site-level";
 }
 
@@ -161,47 +147,70 @@ export class LunarScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
+
+  // Overview objects
+  private overviewGroup = new THREE.Group();
   private moonMesh!: THREE.Mesh;
   private terminatorMesh!: THREE.Mesh;
   private sunMesh!: THREE.Mesh;
   private earthMesh!: THREE.Mesh;
-  private siteMarker!: THREE.Mesh;
+  private siteMarker!: THREE.Group;
   private sunLight!: THREE.DirectionalLight;
+  private gridGroup = new THREE.Group();
+
+  // Site-level surface objects
+  private surfaceGroup = new THREE.Group();
+  private groundDisc!: THREE.Mesh;
+  private horizonRing!: THREE.Line;
+  private terrainSilhouetteLine!: THREE.Line;
+  private compassGroup = new THREE.Group();
+  private surfaceSunMesh!: THREE.Mesh;
+  private surfaceEarthMesh!: THREE.Mesh;
+
   private animationId: number | null = null;
   private site: LunarSite;
   private skyState: SkyState;
+  private mask: HorizonMask | null = null;
   private viewMode: "overview" | "site-level";
 
-  // Orbit controls state
+  // Controls state
   private isDragging = false;
   private previousMousePosition = { x: 0, y: 0 };
-  private rotationSpeed = { x: 0, y: 0 };
   private spherical = new THREE.Spherical(5, Math.PI / 3, 0);
   private targetSpherical = new THREE.Spherical(5, Math.PI / 3, 0);
+
+  // Surface view camera angles
+  private surfaceYaw = 0; // Azimuth looking angle (radians)
+  private surfacePitch = 0.2; // Elevation looking angle (radians)
+  private targetSurfaceYaw = 0;
+  private targetSurfacePitch = 0.2;
 
   constructor(options: SceneOptions) {
     this.container = options.container;
     this.site = options.site;
     this.skyState = options.skyState;
+    this.mask = options.mask ?? null;
     this.viewMode = options.viewMode;
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000);
+    this.scene.background = new THREE.Color(0x0a0a0f);
 
     // Camera
-    const aspect = this.container.clientWidth / this.container.clientHeight;
-    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10000);
+    const aspect = this.container.clientWidth / this.container.clientHeight || 1;
+    this.camera = new THREE.PerspectiveCamera(50, aspect, 0.05, 1_000_000);
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
-    // Build scene objects (async — loads textures)
+    this.scene.add(this.overviewGroup);
+    this.scene.add(this.surfaceGroup);
+
     this.initScene();
   }
 
@@ -216,53 +225,66 @@ export class LunarScene {
     // Stars background
     this.addStars();
 
-    // Moon — load real texture
-    const moonGeometry = new THREE.SphereGeometry(MOON_RADIUS_KM * OVERVIEW_SCALE, 64, 32);
+    // Ambient light
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+    this.scene.add(ambientLight);
+
+    /* ── Overview Group ── */
+
+    // Moon sphere
+    const moonGeometry = new THREE.SphereGeometry(MOON_SCENE_RADIUS, 64, 32);
     const moonTexture = await loadMoonTexture();
     const moonMaterial = new THREE.MeshStandardMaterial({
       map: moonTexture,
-      roughness: 0.9,
-      metalness: 0.1,
+      roughness: 0.95,
+      metalness: 0.05,
     });
     this.moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
     this.moonMesh.castShadow = true;
     this.moonMesh.receiveShadow = true;
-    this.scene.add(this.moonMesh);
+    this.overviewGroup.add(this.moonMesh);
 
-    // Terminator overlay — dark hemisphere showing night side (only the back half)
-    const terminatorGeometry = new THREE.SphereGeometry(
-      MOON_RADIUS_KM * OVERVIEW_SCALE * 1.002, 64, 32, 0, Math.PI,
-    );
+    // Terminator overlay (soft shadow for unlit side)
+    const terminatorGeometry = new THREE.SphereGeometry(MOON_SCENE_RADIUS * 1.002, 64, 32, 0, Math.PI);
     const terminatorMaterial = new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.65,
       side: THREE.FrontSide,
       depthWrite: false,
     });
     this.terminatorMesh = new THREE.Mesh(terminatorGeometry, terminatorMaterial);
-    this.scene.add(this.terminatorMesh);
+    this.overviewGroup.add(this.terminatorMesh);
 
-    // Sun
-    const sunScale = SUN_RADIUS_KM * OVERVIEW_SCALE * 0.01;
+    // Selenographic Grid Lines (Equator & Prime Meridian)
+    this.buildSelenographicGrid();
+    this.overviewGroup.add(this.gridGroup);
+
+    // Sun (overview)
+    const sunScale = SUN_RADIUS_KM * OVERVIEW_SCALE;
     const sunGeometry = new THREE.SphereGeometry(sunScale, 32, 16);
-    const sunMaterial = new THREE.MeshBasicMaterial({
-      color: 0xf59e0b,
-    });
+    const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
     this.sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
 
-    // Sun glow
-    const sunGlowGeometry = new THREE.SphereGeometry(sunScale * 1.5, 32, 16);
+    // Sun Corona Glow
+    const sunGlowGeometry = new THREE.SphereGeometry(sunScale * 1.8, 32, 16);
     const sunGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xf59e0b,
+      color: 0xfbbf24,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.35,
     });
-    const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-    this.sunMesh.add(sunGlow);
+    this.sunMesh.add(new THREE.Mesh(sunGlowGeometry, sunGlowMaterial));
+    this.overviewGroup.add(this.sunMesh);
 
-    // Earth — load real texture
-    const earthScale = EARTH_RADIUS_KM * OVERVIEW_SCALE * 0.5;
+    // Solar Directional Light
+    this.sunLight = new THREE.DirectionalLight(0xfff8e7, 2.2);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
+    this.overviewGroup.add(this.sunLight);
+
+    // Earth (overview)
+    const earthScale = EARTH_RADIUS_KM * OVERVIEW_SCALE;
     const earthGeometry = new THREE.SphereGeometry(earthScale, 32, 16);
     const earthTexture = await loadEarthTexture();
     const earthMaterial = new THREE.MeshStandardMaterial({
@@ -271,45 +293,171 @@ export class LunarScene {
       metalness: 0.1,
     });
     this.earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
-    this.scene.add(this.earthMesh);
+    this.overviewGroup.add(this.earthMesh);
 
-    // Site marker
-    const markerGeometry = new THREE.SphereGeometry(0.02, 16, 8);
-    const markerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x3b82f6,
-    });
-    this.siteMarker = new THREE.Mesh(markerGeometry, markerMaterial);
-    this.scene.add(this.siteMarker);
+    // Landing Site Pin Marker
+    this.siteMarker = new THREE.Group();
+    const pinGeometry = new THREE.SphereGeometry(0.025, 16, 8);
+    const pinMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6 });
+    const pinMesh = new THREE.Mesh(pinGeometry, pinMaterial);
+    this.siteMarker.add(pinMesh);
 
-    // Marker ring
-    const ringGeometry = new THREE.RingGeometry(0.03, 0.04, 32);
+    // Pulsing radar ring
+    const ringGeometry = new THREE.RingGeometry(0.035, 0.05, 32);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x3b82f6,
+      color: 0x60a5fa,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.8,
     });
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.rotation.x = Math.PI / 2;
     this.siteMarker.add(ring);
-    ring.lookAt(new THREE.Vector3(0, 0, 0));
+    this.overviewGroup.add(this.siteMarker);
 
-    // Lighting
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 2);
-    this.sunLight.castShadow = true;
-    this.scene.add(this.sunLight);
+    /* ── Site-Level Surface Group ── */
 
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
-    this.scene.add(ambientLight);
+    // Ground Disc (lunar regolith floor)
+    const groundGeometry = new THREE.CircleGeometry(10, 64);
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      color: 0x222228,
+      roughness: 0.95,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+    });
+    this.groundDisc = new THREE.Mesh(groundGeometry, groundMaterial);
+    this.groundDisc.rotation.x = -Math.PI / 2;
+    this.surfaceGroup.add(this.groundDisc);
+
+    // 0° Elevation Horizon Ring
+    const horizonCurve = new THREE.EllipseCurve(0, 0, 9.8, 9.8, 0, 2 * Math.PI, false, 0);
+    const horizonPoints = horizonCurve.getPoints(120).map((p) => new THREE.Vector3(p.x, 0.02, p.y));
+    const horizonGeom = new THREE.BufferGeometry().setFromPoints(horizonPoints);
+    this.horizonRing = new THREE.Line(
+      horizonGeom,
+      new THREE.LineDashedMaterial({ color: 0x71717a, dashSize: 0.4, gapSize: 0.2 }),
+    );
+    this.horizonRing.computeLineDistances();
+    this.surfaceGroup.add(this.horizonRing);
+
+    // 3D Terrain Horizon Mask Silhouette Line
+    const terrainPoints: THREE.Vector3[] = [];
+    const rTerrain = 9.5;
+    for (let az = 0; az <= 360; az += 2) {
+      const azRad = (az * Math.PI) / 180;
+      const elevDeg = 0; // updated in updateSurfaceScene
+      const elevRad = (elevDeg * Math.PI) / 180;
+      const x = rTerrain * Math.sin(azRad) * Math.cos(elevRad);
+      const y = rTerrain * Math.sin(elevRad);
+      const z = -rTerrain * Math.cos(azRad) * Math.cos(elevRad);
+      terrainPoints.push(new THREE.Vector3(x, y, z));
+    }
+    const terrainGeom = new THREE.BufferGeometry().setFromPoints(terrainPoints);
+    this.terrainSilhouetteLine = new THREE.Line(
+      terrainGeom,
+      new THREE.LineBasicMaterial({ color: 0xa1a1aa, linewidth: 2 }),
+    );
+    this.surfaceGroup.add(this.terrainSilhouetteLine);
+
+    // Compass Rose with N, E, S, W labels
+    this.buildCompassRose();
+    this.surfaceGroup.add(this.compassGroup);
+
+    // Surface Sun
+    const surfaceSunGeom = new THREE.SphereGeometry(0.35, 32, 16);
+    const surfaceSunMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    this.surfaceSunMesh = new THREE.Mesh(surfaceSunGeom, surfaceSunMat);
+    const surfaceSunGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.65, 32, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.4 }),
+    );
+    this.surfaceSunMesh.add(surfaceSunGlow);
+    this.surfaceGroup.add(this.surfaceSunMesh);
+
+    // Surface Earth
+    const surfaceEarthGeom = new THREE.SphereGeometry(0.45, 32, 16);
+    const surfaceEarthMat = new THREE.MeshStandardMaterial({
+      map: earthTexture,
+      roughness: 0.6,
+    });
+    this.surfaceEarthMesh = new THREE.Mesh(surfaceEarthGeom, surfaceEarthMat);
+    this.surfaceGroup.add(this.surfaceEarthMesh);
+  }
+
+  private buildSelenographicGrid() {
+    const r = MOON_SCENE_RADIUS * 1.001;
+
+    // Equator ring
+    const eqCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
+    const eqPoints = eqCurve.getPoints(90).map((p) => new THREE.Vector3(p.x, 0, p.y));
+    const eqGeom = new THREE.BufferGeometry().setFromPoints(eqPoints);
+    const eqLine = new THREE.Line(
+      eqGeom,
+      new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.25 }),
+    );
+    this.gridGroup.add(eqLine);
+
+    // Prime meridian ring
+    const pmCurve = new THREE.EllipseCurve(0, 0, r, r, 0, 2 * Math.PI, false, 0);
+    const pmPoints = pmCurve.getPoints(90).map((p) => new THREE.Vector3(p.x, p.y, 0));
+    const pmGeom = new THREE.BufferGeometry().setFromPoints(pmPoints);
+    const pmLine = new THREE.Line(
+      pmGeom,
+      new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.25 }),
+    );
+    this.gridGroup.add(pmLine);
+  }
+
+  private buildCompassRose() {
+    // Cardinal directions: North is +Z (or -Z depending on convention; let North be -Z, East be +X)
+    const dirs = [
+      { label: "N", az: 0, color: 0xf59e0b },
+      { label: "E", az: 90, color: 0xa1a1aa },
+      { label: "S", az: 180, color: 0xa1a1aa },
+      { label: "W", az: 270, color: 0xa1a1aa },
+    ];
+
+    for (const d of dirs) {
+      const azRad = (d.az * Math.PI) / 180;
+      const x = 9.2 * Math.sin(azRad);
+      const z = -9.2 * Math.cos(azRad);
+
+      // Line from center to direction
+      const points = [new THREE.Vector3(0, 0.01, 0), new THREE.Vector3(x, 0.01, z)];
+      const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({ color: d.color, transparent: true, opacity: 0.4 }));
+      this.compassGroup.add(line);
+
+      // Text billboard marker for Cardinal label
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = d.label === "N" ? "#f59e0b" : "#f7f7f8";
+      ctx.font = "bold 44px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(d.label, 32, 32);
+
+      const spriteMat = new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(canvas),
+        transparent: true,
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.set(x * 1.05, 0.5, z * 1.05);
+      sprite.scale.set(1.2, 1.2, 1);
+      this.compassGroup.add(sprite);
+    }
   }
 
   private addStars() {
     const starsGeometry = new THREE.BufferGeometry();
-    const starCount = 2000;
+    const starCount = 2500;
     const positions = new Float32Array(starCount * 3);
 
     for (let i = 0; i < starCount; i++) {
       const i3 = i * 3;
-      const radius = 500 + Math.random() * 500;
+      const radius = 600 + Math.random() * 600;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
 
@@ -319,15 +467,12 @@ export class LunarScene {
     }
 
     starsGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-
     const starsMaterial = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.5,
+      size: 0.6,
       sizeAttenuation: true,
     });
-
-    const stars = new THREE.Points(starsGeometry, starsMaterial);
-    this.scene.add(stars);
+    this.scene.add(new THREE.Points(starsGeometry, starsMaterial));
   }
 
   private setupControls() {
@@ -346,29 +491,44 @@ export class LunarScene {
         y: e.clientY - this.previousMousePosition.y,
       };
 
-      this.targetSpherical.theta -= deltaMove.x * 0.01;
-      this.targetSpherical.phi -= deltaMove.y * 0.01;
-      this.targetSpherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.targetSpherical.phi));
+      if (this.viewMode === "overview") {
+        this.targetSpherical.theta -= deltaMove.x * 0.008;
+        this.targetSpherical.phi -= deltaMove.y * 0.008;
+        this.targetSpherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.targetSpherical.phi));
+      } else {
+        // Site-level: yaw & pitch
+        this.targetSurfaceYaw -= deltaMove.x * 0.006;
+        this.targetSurfacePitch += deltaMove.y * 0.004;
+        this.targetSurfacePitch = Math.max(-0.2, Math.min(1.4, this.targetSurfacePitch));
+      }
 
       this.previousMousePosition = { x: e.clientX, y: e.clientY };
     });
 
-    canvas.addEventListener("mouseup", () => {
+    const stopDrag = () => {
       this.isDragging = false;
-    });
+    };
+    canvas.addEventListener("mouseup", stopDrag);
+    canvas.addEventListener("mouseleave", stopDrag);
 
-    canvas.addEventListener("mouseleave", () => {
-      this.isDragging = false;
-    });
+    canvas.addEventListener(
+      "wheel",
+      (e: WheelEvent) => {
+        e.preventDefault();
+        if (this.viewMode === "overview") {
+          this.targetSpherical.radius *= e.deltaY > 0 ? 1.08 : 0.92;
+          this.targetSpherical.radius = Math.max(2.1, Math.min(18, this.targetSpherical.radius));
+        } else {
+          // In surface view, adjust FOV / zoom
+          this.camera.fov = Math.max(30, Math.min(75, this.camera.fov + (e.deltaY > 0 ? 3 : -3)));
+          this.camera.updateProjectionMatrix();
+        }
+      },
+      { passive: false },
+    );
 
-    canvas.addEventListener("wheel", (e: WheelEvent) => {
-      e.preventDefault();
-      this.targetSpherical.radius *= e.deltaY > 0 ? 1.1 : 0.9;
-      this.targetSpherical.radius = Math.max(2, Math.min(20, this.targetSpherical.radius));
-    }, { passive: false });
-
-    // Touch support
-    let touchStartDistance = 0;
+    // Touch controls
+    let touchStartDist = 0;
     canvas.addEventListener("touchstart", (e: TouchEvent) => {
       if (e.touches.length === 1) {
         this.isDragging = true;
@@ -376,126 +536,186 @@ export class LunarScene {
       } else if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+        touchStartDist = Math.hypot(dx, dy);
       }
     });
 
-    canvas.addEventListener("touchmove", (e: TouchEvent) => {
-      e.preventDefault();
-      if (e.touches.length === 1 && this.isDragging) {
-        const deltaMove = {
-          x: e.touches[0].clientX - this.previousMousePosition.x,
-          y: e.touches[0].clientY - this.previousMousePosition.y,
-        };
+    canvas.addEventListener(
+      "touchmove",
+      (e: TouchEvent) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && this.isDragging) {
+          const deltaMove = {
+            x: e.touches[0].clientX - this.previousMousePosition.x,
+            y: e.touches[0].clientY - this.previousMousePosition.y,
+          };
+          if (this.viewMode === "overview") {
+            this.targetSpherical.theta -= deltaMove.x * 0.008;
+            this.targetSpherical.phi -= deltaMove.y * 0.008;
+            this.targetSpherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.targetSpherical.phi));
+          } else {
+            this.targetSurfaceYaw -= deltaMove.x * 0.006;
+            this.targetSurfacePitch += deltaMove.y * 0.004;
+            this.targetSurfacePitch = Math.max(-0.2, Math.min(1.4, this.targetSurfacePitch));
+          }
+          this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2 && this.viewMode === "overview") {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.hypot(dx, dy);
+          if (touchStartDist > 0) {
+            const scale = touchStartDist / dist;
+            this.targetSpherical.radius *= scale;
+            this.targetSpherical.radius = Math.max(2.1, Math.min(18, this.targetSpherical.radius));
+          }
+          touchStartDist = dist;
+        }
+      },
+      { passive: false },
+    );
 
-        this.targetSpherical.theta -= deltaMove.x * 0.01;
-        this.targetSpherical.phi -= deltaMove.y * 0.01;
-        this.targetSpherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, this.targetSpherical.phi));
+    canvas.addEventListener("touchend", stopDrag);
 
-        this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      } else if (e.touches.length === 2) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const scale = touchStartDistance / distance;
-        this.targetSpherical.radius *= scale;
-        this.targetSpherical.radius = Math.max(2, Math.min(20, this.targetSpherical.radius));
-        touchStartDistance = distance;
-      }
-    }, { passive: false });
-
-    canvas.addEventListener("touchend", () => {
-      this.isDragging = false;
-    });
-
-    // Keyboard controls
+    // Keyboard navigation
     canvas.addEventListener("keydown", (e: KeyboardEvent) => {
       switch (e.key) {
         case "ArrowLeft":
-          this.targetSpherical.theta -= 0.1;
+          if (this.viewMode === "overview") this.targetSpherical.theta -= 0.1;
+          else this.targetSurfaceYaw += 0.1;
           break;
         case "ArrowRight":
-          this.targetSpherical.theta += 0.1;
+          if (this.viewMode === "overview") this.targetSpherical.theta += 0.1;
+          else this.targetSurfaceYaw -= 0.1;
           break;
         case "ArrowUp":
-          this.targetSpherical.phi = Math.max(0.1, this.targetSpherical.phi - 0.1);
+          if (this.viewMode === "overview") this.targetSpherical.phi = Math.max(0.1, this.targetSpherical.phi - 0.1);
+          else this.targetSurfacePitch = Math.min(1.4, this.targetSurfacePitch + 0.1);
           break;
         case "ArrowDown":
-          this.targetSpherical.phi = Math.min(Math.PI - 0.1, this.targetSpherical.phi + 0.1);
+          if (this.viewMode === "overview") this.targetSpherical.phi = Math.min(Math.PI - 0.1, this.targetSpherical.phi + 0.1);
+          else this.targetSurfacePitch = Math.max(-0.2, this.targetSurfacePitch - 0.1);
           break;
         case "+":
         case "=":
-          this.targetSpherical.radius = Math.max(2, this.targetSpherical.radius - 0.5);
+          if (this.viewMode === "overview") this.targetSpherical.radius = Math.max(2.1, this.targetSpherical.radius - 0.5);
           break;
         case "-":
-          this.targetSpherical.radius = Math.min(20, this.targetSpherical.radius + 0.5);
+          if (this.viewMode === "overview") this.targetSpherical.radius = Math.min(18, this.targetSpherical.radius + 0.5);
           break;
       }
     });
 
     canvas.setAttribute("tabindex", "0");
-    canvas.setAttribute("aria-label", "3D lunar scene - drag to rotate, scroll to zoom, arrow keys to navigate");
+    canvas.setAttribute("aria-label", "Interactive 3D lunar scene: drag to rotate, scroll to zoom, arrow keys to navigate.");
   }
 
   private updateView() {
-    // Convert selenographic coordinates to 3D position on Moon surface
+    const isOverview = this.viewMode === "overview";
+    this.overviewGroup.visible = isOverview;
+    this.surfaceGroup.visible = !isOverview;
+
+    if (isOverview) {
+      this.updateOverviewScene();
+    } else {
+      this.updateSurfaceScene();
+    }
+  }
+
+  private updateOverviewScene() {
+    // Landing site position in selenographic coords
     const latRad = (this.site.latDeg * Math.PI) / 180;
     const lonRad = (this.site.eastLonDeg * Math.PI) / 180;
 
-    const siteX = MOON_RADIUS_KM * OVERVIEW_SCALE * Math.cos(latRad) * Math.cos(lonRad);
-    const siteY = MOON_RADIUS_KM * OVERVIEW_SCALE * Math.sin(latRad);
-    const siteZ = MOON_RADIUS_KM * OVERVIEW_SCALE * Math.cos(latRad) * Math.sin(lonRad);
+    const r = MOON_SCENE_RADIUS;
+    const siteX = r * Math.cos(latRad) * Math.cos(lonRad);
+    const siteY = r * Math.sin(latRad);
+    const siteZ = r * Math.cos(latRad) * Math.sin(lonRad);
 
     this.siteMarker.position.set(siteX, siteY, siteZ);
+    this.siteMarker.lookAt(siteX * 2, siteY * 2, siteZ * 2);
 
-    // Position Sun based on sky state azimuth/elevation
-    // In overview mode, place Sun at a compressed distance
+    // Position Sun
     const sunAzRad = ((this.skyState.sunAzimuthDeg - 90) * Math.PI) / 180;
     const sunElRad = (this.skyState.sunElevationDeg * Math.PI) / 180;
+    const sunDistance = SUN_DISTANCE_KM * OVERVIEW_SCALE;
 
-    const sunDistance = 15; // Compressed distance for overview
     this.sunMesh.position.set(
       Math.cos(sunElRad) * Math.sin(sunAzRad) * sunDistance,
       Math.sin(sunElRad) * sunDistance,
       Math.cos(sunElRad) * Math.cos(sunAzRad) * sunDistance,
     );
-
-    // Update sun light direction
     this.sunLight.position.copy(this.sunMesh.position);
 
-    // Update terminator — rotate so dark side faces away from Sun
+    // Update terminator rotation
     const sunDir = this.sunMesh.position.clone().normalize();
-    const terminatorQuat = new THREE.Quaternion();
-    terminatorQuat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), sunDir);
+    const terminatorQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), sunDir);
     this.terminatorMesh.quaternion.copy(terminatorQuat);
 
-    // Position Earth based on sky state
+    // Position Earth
     const earthAzRad = ((this.skyState.earthAzimuthDeg - 90) * Math.PI) / 180;
     const earthElRad = (this.skyState.earthElevationDeg * Math.PI) / 180;
+    const earthDistance = MOON_EARTH_DISTANCE_KM * OVERVIEW_SCALE;
 
-    const earthDistance = 8; // Compressed distance for overview
     this.earthMesh.position.set(
       Math.cos(earthElRad) * Math.sin(earthAzRad) * earthDistance,
       Math.sin(earthElRad) * earthDistance,
       Math.cos(earthElRad) * Math.cos(earthAzRad) * earthDistance,
     );
+  }
 
-    // Set camera position based on view mode
-    if (this.viewMode === "site-level") {
-      // Site-level: camera close to surface, looking out
-      const camDistance = MOON_RADIUS_KM * OVERVIEW_SCALE * 1.05;
-      this.targetSpherical.radius = camDistance;
-      this.targetSpherical.phi = Math.PI / 4; // 45 degrees elevation
+  private updateSurfaceScene() {
+    // Reset camera FOV
+    this.camera.fov = 55;
+    this.camera.updateProjectionMatrix();
+
+    // Position Sun in local horizon sky
+    // Local convention: North is -Z, East is +X, Zenith is +Y
+    const sunAzRad = (this.skyState.sunAzimuthDeg * Math.PI) / 180;
+    const sunElRad = (this.skyState.sunElevationDeg * Math.PI) / 180;
+    const rSky = 9.0;
+
+    const sunX = rSky * Math.sin(sunAzRad) * Math.cos(sunElRad);
+    const sunY = rSky * Math.sin(sunElRad);
+    const sunZ = -rSky * Math.cos(sunAzRad) * Math.cos(sunElRad);
+    this.surfaceSunMesh.position.set(sunX, sunY, sunZ);
+
+    // Position Earth in local horizon sky
+    const earthAzRad = (this.skyState.earthAzimuthDeg * Math.PI) / 180;
+    const earthElRad = (this.skyState.earthElevationDeg * Math.PI) / 180;
+
+    const earthX = rSky * Math.sin(earthAzRad) * Math.cos(earthElRad);
+    const earthY = rSky * Math.sin(earthElRad);
+    const earthZ = -rSky * Math.cos(earthAzRad) * Math.cos(earthElRad);
+    this.surfaceEarthMesh.position.set(earthX, earthY, earthZ);
+
+    // Update 3D terrain silhouette if mask is available
+    if (this.mask && this.mask.elevationDeg && this.mask.elevationDeg.length > 0) {
+      const samples = this.mask.elevationDeg;
+      const points: THREE.Vector3[] = [];
+      const rTerrain = 9.3;
+      for (let az = 0; az <= 360; az += 1) {
+        const azRad = (az * Math.PI) / 180;
+        const idx = Math.min(samples.length - 1, Math.floor((az / 360) * samples.length));
+        const elevDeg = samples[idx] ?? 0;
+        const elevRad = (elevDeg * Math.PI) / 180;
+
+        const x = rTerrain * Math.sin(azRad) * Math.cos(elevRad);
+        const y = Math.max(0.02, rTerrain * Math.sin(elevRad));
+        const z = -rTerrain * Math.cos(azRad) * Math.cos(elevRad);
+        points.push(new THREE.Vector3(x, y, z));
+      }
+      this.terrainSilhouetteLine.geometry.dispose();
+      this.terrainSilhouetteLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+      this.terrainSilhouetteLine.visible = true;
     } else {
-      // Overview: show all bodies
-      this.targetSpherical.radius = 5;
-      this.targetSpherical.phi = Math.PI / 3;
+      this.terrainSilhouetteLine.visible = false;
     }
   }
 
-  public update(site: LunarSite, skyState: SkyState) {
+  public update(site: LunarSite, skyState: SkyState, mask?: HorizonMask | null) {
     this.site = site;
     this.skyState = skyState;
+    if (mask !== undefined) this.mask = mask;
     this.updateView();
   }
 
@@ -504,29 +724,81 @@ export class LunarScene {
     this.updateView();
   }
 
+  /** Set camera to predefined vantage points */
+  public setCameraPreset(preset: "overview" | "site" | "south-pole" | "equator" | "earth-view") {
+    if (preset === "site") {
+      this.setViewMode("site-level");
+      // Align yaw towards Sun azimuth
+      this.targetSurfaceYaw = (this.skyState.sunAzimuthDeg * Math.PI) / 180;
+      this.targetSurfacePitch = 0.25;
+      return;
+    }
+
+    this.setViewMode("overview");
+    switch (preset) {
+      case "overview":
+        this.targetSpherical.radius = 5.2;
+        this.targetSpherical.phi = Math.PI / 3;
+        this.targetSpherical.theta = 0.5;
+        break;
+      case "south-pole":
+        this.targetSpherical.radius = 4.2;
+        this.targetSpherical.phi = 0.15; // looking down at pole
+        this.targetSpherical.theta = 0;
+        break;
+      case "equator":
+        this.targetSpherical.radius = 4.5;
+        this.targetSpherical.phi = Math.PI / 2; // equatorial plane
+        this.targetSpherical.theta = 1.2;
+        break;
+      case "earth-view":
+        // Look from behind Earth towards Moon
+        this.targetSpherical.radius = 7.0;
+        this.targetSpherical.phi = (Math.PI / 2) - ((this.skyState.earthElevationDeg * Math.PI) / 180);
+        this.targetSpherical.theta = (this.skyState.earthAzimuthDeg * Math.PI) / 180;
+        break;
+    }
+  }
+
   private animate() {
     this.animationId = requestAnimationFrame(() => this.animate());
 
-    // Smooth camera movement
-    this.spherical.radius += (this.targetSpherical.radius - this.spherical.radius) * 0.1;
-    this.spherical.theta += (this.targetSpherical.theta - this.spherical.theta) * 0.1;
-    this.spherical.phi += (this.targetSpherical.phi - this.spherical.phi) * 0.1;
+    if (this.viewMode === "overview") {
+      // Smooth spherical camera interpolation
+      this.spherical.radius += (this.targetSpherical.radius - this.spherical.radius) * 0.1;
+      this.spherical.theta += (this.targetSpherical.theta - this.spherical.theta) * 0.1;
+      this.spherical.phi += (this.targetSpherical.phi - this.spherical.phi) * 0.1;
 
-    // Auto-rotate when not dragging
-    if (!this.isDragging) {
-      this.targetSpherical.theta += 0.001;
+      // Auto slow rotate when idle
+      if (!this.isDragging) {
+        this.targetSpherical.theta += 0.0002;
+      }
+
+      this.camera.position.setFromSpherical(this.spherical);
+      this.camera.lookAt(0, 0, 0);
+
+      // Rotate Earth slowly
+      this.earthMesh.rotation.y += 0.0001;
+
+      // Pulse site pin marker
+      const pulse = 1 + Math.sin(Date.now() * 0.004) * 0.15;
+      this.siteMarker.scale.setScalar(pulse);
+    } else {
+      // Surface view: camera sits at center of local horizon plane (0, 0.4, 0)
+      this.surfaceYaw += (this.targetSurfaceYaw - this.surfaceYaw) * 0.12;
+      this.surfacePitch += (this.targetSurfacePitch - this.surfacePitch) * 0.12;
+
+      const eyeY = 0.45;
+      this.camera.position.set(0, eyeY, 0);
+
+      // Look direction from yaw and pitch
+      const lookDist = 10;
+      const targetX = lookDist * Math.sin(this.surfaceYaw) * Math.cos(this.surfacePitch);
+      const targetY = eyeY + lookDist * Math.sin(this.surfacePitch);
+      const targetZ = -lookDist * Math.cos(this.surfaceYaw) * Math.cos(this.surfacePitch);
+
+      this.camera.lookAt(targetX, targetY, targetZ);
     }
-
-    // Update camera position
-    this.camera.position.setFromSpherical(this.spherical);
-    this.camera.lookAt(0, 0, 0);
-
-    // Rotate Earth slowly
-    this.earthMesh.rotation.y += 0.002;
-
-    // Pulse site marker
-    const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.2;
-    this.siteMarker.scale.setScalar(pulse);
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -534,6 +806,7 @@ export class LunarScene {
   public resize() {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
+    if (width === 0 || height === 0) return;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
@@ -544,6 +817,8 @@ export class LunarScene {
       cancelAnimationFrame(this.animationId);
     }
     this.renderer.dispose();
-    this.container.removeChild(this.renderer.domElement);
+    if (this.renderer.domElement.parentNode) {
+      this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+    }
   }
 }

@@ -31,6 +31,9 @@ importers:
       core:
         specifier: workspace:*
         version: link:../core
+      lucide:
+        specifier: ^1.73.0
+        version: 1.73.0
       three:
         specifier: ^0.170.0
         version: 0.170.0
@@ -1224,6 +1227,9 @@ packages:
   lru-cache@11.5.3:
     resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
     engines: {node: 20 || >=22}
+
+  lucide@1.73.0:
+    resolution: {integrity: sha512-qiNin5j7qEflnAdLG/9Yb4d5N9qnnP8TOMdn6e66399fgX25Y0eYEPS3PUPWGIPLloOj4X+xLTdF2lk9gSgWpA==}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -2573,6 +2579,8 @@ snapshots:
 
   lru-cache@11.5.3:
     optional: true
+
+  lucide@1.73.0: {}
 
   magic-string@0.30.21:
     dependencies:

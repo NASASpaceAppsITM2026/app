@@ -1,14 +1,14 @@
 /**
  * ScenarioState — URL-serializable representation of the current navigation scenario.
  *
- * A scenario captures the site, date, and constraints the user is exploring.
+ * A scenario captures the site, date, hour, view mode, and constraints the user is exploring.
  * It serializes to a compact query-string fragment so the URL can be shared
  * without credentials, private notes, or large datasets.
  *
  * Conventions:
  * - Versioned so future schema changes remain backward-compatible.
  * - No secrets, no large arrays. Only scalar values.
- * - Units carried in names: `latDeg`, `lonDeg`, `dateUtc`.
+ * - Units carried in names: `latDeg`, `lonDeg`, `dateUtc`, `hourUtc`.
  */
 
 import type { Constraint, LunarSite } from "core";
@@ -16,20 +16,30 @@ import type { Constraint, LunarSite } from "core";
 /** Version of the ScenarioState serialization format. */
 const SCENARIO_VERSION = "1";
 
-/** Default site: Shackleton crater rim (lunar south pole candidate). */
-export const DEFAULT_SITE: LunarSite = {
-  id: "shackleton-rim",
-  eastLonDeg: 11.3,
-  latDeg: -89.5,
-};
+/** Known preset sites validated against LOLA DEM horizon masks and SPICE ephemeris. */
+export const PRESET_SITES: LunarSite[] = [
+  { id: "shackleton_connecting_ridge", eastLonDeg: 120.0, latDeg: -89.9 },
+  { id: "malapert_mountain", eastLonDeg: 2.7, latDeg: -86.0 },
+  { id: "de_gerlache_rim", eastLonDeg: -88.0, latDeg: -88.5 },
+  { id: "haworth_crater_rim", eastLonDeg: -5.0, latDeg: -87.4 },
+  { id: "south_pole_895", eastLonDeg: 0.0, latDeg: -89.5 },
+  { id: "south_pole_summer", eastLonDeg: 180.0, latDeg: -89.5 },
+  { id: "apollo11", eastLonDeg: 23.45, latDeg: 0.674 },
+];
 
-/** Default date: near the project's reference window. */
+/** Default site: Shackleton connecting ridge (Artemis candidate). */
+export const DEFAULT_SITE: LunarSite = PRESET_SITES[0];
+
+/** Default date: mid-2026 within the DE440 SPICE Chebyshev fit window. */
 export const DEFAULT_DATE = "2026-06-15";
 
-/** Default constraints: sun above horizon + Earth above horizon. */
+/** Default hour: 12:00 UTC. */
+export const DEFAULT_HOUR_UTC = 12;
+
+/** Default constraints: sun above terrain mask + Earth above terrain mask. */
 export const DEFAULT_CONSTRAINTS: Constraint[] = [
-  { id: "sun-light", kind: "sunAboveHorizon" },
-  { id: "earth-comms", kind: "earthAboveHorizon" },
+  { id: "sun-mask", kind: "sunAboveMask" },
+  { id: "earth-mask", kind: "earthAboveMask" },
 ];
 
 /** Full scenario state held in memory. */
@@ -37,6 +47,8 @@ export interface ScenarioState {
   readonly version: string;
   readonly site: LunarSite;
   readonly dateUtc: string; // ISO-8601 date YYYY-MM-DD
+  readonly hourUtc: number; // 0 to 23
+  readonly viewMode: "overview" | "site-level";
   readonly constraints: readonly Constraint[];
 }
 
@@ -46,6 +58,8 @@ export function defaultScenario(): ScenarioState {
     version: SCENARIO_VERSION,
     site: DEFAULT_SITE,
     dateUtc: DEFAULT_DATE,
+    hourUtc: DEFAULT_HOUR_UTC,
+    viewMode: "overview",
     constraints: DEFAULT_CONSTRAINTS,
   };
 }
@@ -61,6 +75,8 @@ export function scenarioToQuery(state: ScenarioState): Record<string, string> {
     lon: state.site.eastLonDeg.toFixed(4),
     lat: state.site.latDeg.toFixed(4),
     date: state.dateUtc,
+    hour: String(state.hourUtc ?? DEFAULT_HOUR_UTC),
+    view: state.viewMode,
     constraints: state.constraints.map((c) => c.kind).join(","),
   };
 }
@@ -70,17 +86,21 @@ export function scenarioToQuery(state: ScenarioState): Record<string, string> {
  */
 export function scenarioToUrl(state: ScenarioState): string {
   const params = new URLSearchParams(scenarioToQuery(state));
-  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://lunar-navigator.nasa";
+  const path = typeof window !== "undefined" ? window.location.pathname : "/";
+  return `${origin}${path}?${params.toString()}`;
 }
 
-/** Known preset sites for quick selection. */
-export const PRESET_SITES: LunarSite[] = [
-  { id: "shackleton-rim", eastLonDeg: 11.3, latDeg: -89.5 },
-  { id: "malapert-a", eastLonDeg: 17.5, latDeg: -87.8 },
-  { id: "shoemaker", eastLonDeg: 11.7, latDeg: -87.6 },
-  { id: "cavendish", eastLonDeg: 12.0, latDeg: -88.7 },
-  { id: "apollo-11", eastLonDeg: 23.47, latDeg: 0.67 },
-];
+/**
+ * Legacy ID aliases mapping old preset names to current pipeline IDs.
+ */
+const ID_ALIASES: Record<string, string> = {
+  "shackleton-rim": "shackleton_connecting_ridge",
+  "malapert-a": "malapert_mountain",
+  "apollo-11": "apollo11",
+  shoemaker: "haworth_crater_rim",
+  cavendish: "south_pole_895",
+};
 
 /**
  * Parse a URL query-string back into a ScenarioState.
@@ -90,13 +110,16 @@ export function scenarioFromQuery(params: URLSearchParams): ScenarioState {
   const version: string = params.get("v") ?? SCENARIO_VERSION;
 
   // Site
-  let site: LunarSite | undefined = PRESET_SITES.find((s) => s.id === params.get("site"));
+  const rawSiteId = params.get("site");
+  const normalizedId = rawSiteId && ID_ALIASES[rawSiteId] ? ID_ALIASES[rawSiteId] : rawSiteId;
+  let site: LunarSite | undefined = PRESET_SITES.find((s) => s.id === normalizedId);
+
   if (!site) {
     const lon = parseFloat(params.get("lon") ?? "");
     const lat = parseFloat(params.get("lat") ?? "");
     if (Number.isFinite(lon) && Number.isFinite(lat)) {
       site = {
-        id: (params.get("site") ?? "custom") as string,
+        id: (rawSiteId ?? "custom") as string,
         eastLonDeg: lon,
         latDeg: lat,
       };
@@ -109,25 +132,44 @@ export function scenarioFromQuery(params: URLSearchParams): ScenarioState {
   const date = params.get("date");
   const dateUtc: string = /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") ? (date ?? DEFAULT_DATE) : DEFAULT_DATE;
 
+  // Hour
+  const rawHour = parseInt(params.get("hour") ?? "", 10);
+  const hourUtc = Number.isFinite(rawHour) && rawHour >= 0 && rawHour <= 23 ? rawHour : DEFAULT_HOUR_UTC;
+
+  // View mode
+  const rawView = params.get("view");
+  const viewMode: "overview" | "site-level" = rawView === "site-level" ? "site-level" : "overview";
+
   // Constraints
   const constraintStr = params.get("constraints");
   const constraints: Constraint[] = constraintStr
     ? constraintStr.split(",").filter(Boolean).map((kind) => ({ id: kind, kind }))
     : DEFAULT_CONSTRAINTS;
 
-  return { version, site: site ?? DEFAULT_SITE, dateUtc, constraints };
+  return { version, site: site ?? DEFAULT_SITE, dateUtc, hourUtc, viewMode, constraints };
 }
 
 /**
- * Read the current ScenarioState from the browser URL hash or query string.
+ * Read the current ScenarioState from the browser URL query string.
  */
 export function readScenarioFromUrl(): ScenarioState {
+  if (typeof window === "undefined") return defaultScenario();
   return scenarioFromQuery(new URLSearchParams(window.location.search));
 }
 
 /** Human-readable label for a site ID. */
 export function siteLabel(id: string): string {
+  const map: Record<string, string> = {
+    shackleton_connecting_ridge: "Shackleton Connecting Ridge",
+    malapert_mountain: "Malapert Mountain Peak",
+    de_gerlache_rim: "De Gerlache Crater Rim",
+    haworth_crater_rim: "Haworth Crater Rim",
+    south_pole_895: "South Pole -89.5° (Prime Meridian)",
+    south_pole_summer: "South Pole -89.5° (180°E)",
+    apollo11: "Apollo 11 Landing Site",
+  };
+  if (map[id]) return map[id];
   return id
-    .replace(/-/g, " ")
+    .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }

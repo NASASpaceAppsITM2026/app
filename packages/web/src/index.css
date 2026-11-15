@@ -1,39 +1,37 @@
 @import "tailwindcss";
 
-/* ── Deep Space Theme (per Docs/frontend-conventions/DESIGN.md) ── */
+/* ── Deep Space Minimalist Theme (per Docs/frontend-conventions/DESIGN.md & design-taste-frontend) ── */
 
 :root {
   /* Backgrounds */
-  --color-bg-primary: #0f0e13;    /* Deep space — app background */
-  --color-bg-surface: #1d1b22;    /* Card / elevated panels */
-  --color-bg-elevated: #27272a;   /* Subtle elevation above surface */
-  --color-bg-input: #1d1b22;      /* Inputs share surface background */
+  --color-bg-primary: #0a0a0f;    /* Deep space black */
+  --color-bg-surface: #141318;    /* Translucent glass surface */
+  --color-bg-elevated: #1f1e24;   /* Subtle elevated glass */
+  --color-bg-input: #100f14;      /* Deep input surface */
 
   /* Text */
-  --color-text-primary: #f7f7f8;  /* Body text, headings — near-white */
+  --color-text-primary: #f7f7f8;  /* Near-white */
   --color-text-secondary: #a1a1aa; /* Secondary labels */
-  --color-text-muted: #71717a;    /* Disabled states, captions */
+  --color-text-muted: #71717a;    /* Captions */
 
   /* Borders */
-  --color-border: #27272a;        /* Subtle dividers on dark surfaces */
-  --color-border-focus: #f59e0b;  /* Accent focus ring */
+  --color-border: #27272a;        /* Subtle divider */
+  --color-border-focus: #f59e0b;  /* Solar amber ring */
 
   /* Semantic colors */
-  --color-accent: #f59e0b;        /* Solar amber — primary actions, links, solar highlights */
-  --color-warning: #d97706;       /* Caution states */
-  --color-error: #dc2626;         /* Invalid input, failed validation */
-  --color-success: #16a34a;       /* Valid state, confirmed computation */
-  --color-info: #3b82f6;          /* Neutral information, Earth */
+  --color-accent: #f59e0b;        /* Solar amber */
+  --color-warning: #d97706;       /* Caution */
+  --color-error: #dc2626;         /* Error */
+  --color-success: #16a34a;       /* Success */
+  --color-info: #3b82f6;          /* Earth blue */
 
-  /* Domain colors (Sun = solar accent, Earth = info blue) */
-  --color-sun: #f59e0b;           /* Solar accent for Sun */
-  --color-earth: #3b82f6;         /* Info blue for Earth */
-  --color-terrain: #a1a1aa;       /* Muted terrain */
+  --color-sun: #f59e0b;           /* Solar */
+  --color-earth: #3b82f6;         /* Earth */
+  --color-terrain: #a1a1aa;       /* LOLA Terrain */
 
-  /* Constraint verdicts */
-  --color-meets: #16a34a;         /* Success green for passes */
-  --color-misses: #dc2626;        /* Error red for failures */
-  --color-unknown: #71717a;       /* Muted for unknown */
+  --color-meets: #16a34a;
+  --color-misses: #dc2626;
+  --color-unknown: #71717a;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
@@ -48,49 +46,90 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100vh;
+  width: 100vw;
   overflow: hidden;
+  user-select: none;
 }
 
-/* ── Dashboard shell: no-scroll, full viewport ── */
+/* ── Full viewport shell ── */
 
 #app {
-  display: flex;
-  flex-direction: column;
+  width: 100vw;
   height: 100vh;
+  position: relative;
   overflow: hidden;
 }
 
-/* ── Focus visible for keyboard nav ── */
+/* ── Focus visible for accessibility ── */
 
 :focus-visible {
-  outline: 2px solid var(--color-border-focus);
-  outline-offset: 2px;
+  outline: 2px solid var(--color-border-focus) !important;
+  outline-offset: 2px !important;
 }
 
-/* ── Skip link for keyboard users ── */
+/* ── Glass Pill / Isle Styling ── */
 
-.skip-link {
-  position: absolute;
-  top: -100%;
-  left: 0;
-  background: var(--color-bg-elevated);
-  color: var(--color-text-primary);
-  padding: 0.5rem 1rem;
+.glass-pill {
+  background: rgba(20, 19, 24, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-pill:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.floating-isle {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 660px;
+  max-width: calc(100vw - 32px);
   z-index: 50;
-  font-weight: 600;
-  text-decoration: none;
-  border-radius: 0 0 0.5rem 0;
+  background: rgba(18, 17, 23, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.25rem;
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.skip-link:focus {
-  top: 0;
+/* ── Custom Range Slider ── */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-bg-elevated);
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
 }
 
-/* ── Scrollbar styling for internal panels ── */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+  border: 2px solid #ffffff;
+  transition: transform 0.1s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* ── Scrollbars ── */
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -99,15 +138,53 @@ html, body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+/* ── Toast banner ── */
+
+.toast-container {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
 }
 
-/* ── SVG chart defaults ── */
+.toast {
+  pointer-events: auto;
+  background: rgba(20, 19, 24, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-text-primary);
+  padding: 8px 14px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toast-slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
 
-svg text {
-  font-family: var(--font-sans);
+@keyframes toast-slide-in {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ── Modal backdrop ── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
