@@ -397,7 +397,7 @@ function buildTopNavbar(): HTMLElement {
   // Logo & Title
   const brand = el("div", { class: "flex items-center gap-1.5 pr-2 border-r border-[var(--color-border)]" },
     el("span", { class: "text-sm text-[var(--color-accent)]" }, createElement(Moon, { class: "h-4 w-4" })),
-    el("span", { class: "font-bold tracking-wider text-[11px] uppercase text-[var(--color-text-primary)]" }, "Lunar Navigator"),
+    el("span", { class: "font-bold tracking-wider text-[11px] uppercase text-[var(--color-text-primary)]" }, "Moonpie"),
   );
   nav.appendChild(brand);
 
