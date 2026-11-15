@@ -372,11 +372,14 @@ function buildMinimalistApp(root: HTMLElement) {
   // 2. Floating Top Navbar
   root.appendChild(buildTopNavbar());
 
-  // 3. Floating Isle (Center-Bottom AI & Mission Control Island)
-  root.appendChild(buildFloatingIsle());
-
-  // 4. Subtle Playback Scrubber (Floating just above the isle)
-  root.appendChild(buildPlaybackHUD());
+  // 3. Bottom controls stay in one stack so the playback scrubber cannot overlap the isle.
+  const bottomControls = el("div", {
+    id: "bottom-controls",
+    class: "fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col-reverse items-center gap-2 pointer-events-none",
+  });
+  bottomControls.appendChild(buildFloatingIsle());
+  bottomControls.appendChild(buildPlaybackHUD());
+  root.appendChild(bottomControls);
 
   // 5. Modals / Flyout Containers
   const flyouts = el("div", { id: "flyout-container", class: "pointer-events-none absolute inset-0 z-40" });
@@ -1006,7 +1009,7 @@ async function runInlineScoreSites(container: HTMLElement) {
 function buildPlaybackHUD(): HTMLElement {
   const hud = el("div", {
     id: "playback-hud",
-    class: "fixed bottom-[88px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 glass-pill px-3 py-1 rounded-full text-xs",
+    class: "flex items-center gap-3 glass-pill px-3 py-1 rounded-full text-xs pointer-events-auto",
   });
 
   // Play / Pause Button
