@@ -1461,18 +1461,24 @@ async function openSiteInfoModal(site: LunarSite = state.site) {
   // 4. Nearby landing sites (left, so the map can stay large and uncluttered).
   const nearby = nearbyLandingSites(site);
   const nearbyList = el("div", { class: "space-y-1 max-h-[140px] overflow-y-auto" });
-  for (const n of nearby) {
-    const row = el("button", {
-      class: "w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-[var(--color-bg-input)] hover:bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-left transition-colors",
-    },
-      el("span", { class: "text-[11px] font-semibold text-[var(--color-text-primary)]" }, siteLabel(n.id)),
-      el("span", { class: "font-mono text-[9px] text-[var(--color-text-muted)]" }, `${surfaceDistanceKm(site, n).toFixed(0)} km`),
-    );
-    row.addEventListener("click", () => {
-      closeSiteInfoModal();
-      switchSite(n);
-    });
-    nearbyList.appendChild(row);
+  if (nearby.length === 0) {
+    nearbyList.appendChild(el("div", {
+      class: "rounded-lg border border-dashed border-[var(--color-border)] px-3 py-4 text-center text-[11px] text-[var(--color-text-muted)]",
+    }, "No other nearby preset landing sites."));
+  } else {
+    for (const n of nearby) {
+      const row = el("button", {
+        class: "w-full flex items-center justify-between gap-2 p-2 rounded-lg bg-[var(--color-bg-input)] hover:bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-left transition-colors",
+      },
+        el("span", { class: "text-[11px] font-semibold text-[var(--color-text-primary)]" }, siteLabel(n.id)),
+        el("span", { class: "font-mono text-[9px] text-[var(--color-text-muted)]" }, `${surfaceDistanceKm(site, n).toFixed(0)} km`),
+      );
+      row.addEventListener("click", () => {
+        closeSiteInfoModal();
+        switchSite(n);
+      });
+      nearbyList.appendChild(row);
+    }
   }
   leftCol.appendChild(infoSection("Nearby Landing Sites", nearbyList));
 
