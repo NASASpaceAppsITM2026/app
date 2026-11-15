@@ -26,6 +26,10 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
+      - name: Create .env for build
+        run: |
+          echo "VITE_GROQ_API_KEY=${{ secrets.VITE_GROQ_API_KEY }}" > .env
+
       - name: Install dependencies
         run: pnpm install
 
